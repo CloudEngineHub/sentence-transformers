@@ -3,9 +3,10 @@ from __future__ import annotations
 import logging
 import os
 from abc import ABC, abstractmethod
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Iterator
 from itertools import accumulate, cycle
+from typing import Any
 
 import numpy as np
 import torch
@@ -78,10 +79,16 @@ class DefaultBatchSampler(SetEpochMixin, BatchSampler):
 
 class GroupByLabelBatchSampler(DefaultBatchSampler):
     """
-    This sampler groups samples by their labels and aims to create batches such that
-    each batch contains samples where the labels are as homogeneous as possible.
-    This sampler is meant to be used alongside the ``Batch...TripletLoss`` classes, which
-    require that each batch contains at least 2 examples per label class.
+    Batch sampler that groups samples by label for in-batch triplet mining.
+
+    Samples are shuffled within each label, then interleaved in round-robin
+    fashion to produce a stream where labels are well-mixed. This stream is
+    chunked into batches of exactly ``batch_size``. Every batch is guaranteed
+    to contain multiple distinct labels, each with at least 2 samples.
+
+    Labels take turns emitting 2 samples each. The stream stops when fewer
+    than 2 labels remain, so the dominant label's tail ends up in the
+    remainder. Produces excellent per-batch balance.
 
     Recommended for:
         - :class:`~sentence_transformers.losses.BatchAllTripletLoss`
@@ -91,7 +98,7 @@ class GroupByLabelBatchSampler(DefaultBatchSampler):
 
     Args:
         dataset (Dataset): The dataset to sample from.
-        batch_size (int): Number of samples per batch. Must be divisible by 2.
+        batch_size (int): Number of samples per batch. Must be an even number >= 4.
         drop_last (bool): If True, drop the last incomplete batch if the dataset size
             is not divisible by the batch size.
         valid_label_columns (List[str], optional): List of column names to check for labels.
@@ -121,22 +128,32 @@ class GroupByLabelBatchSampler(DefaultBatchSampler):
         )
         self.dataset = dataset
 
-        if self.batch_size % 2 == 1:
-            raise ValueError("The batch size for `GroupByLabelBatchSampler` must be divisible by 2.")
+        if self.batch_size < 4 or self.batch_size % 2 == 1:
+            raise ValueError(f"batch_size must be an even number >= 4, but got {self.batch_size}.")
 
         labels = self._determine_labels_to_use(dataset, self.valid_label_columns)
-        groups = defaultdict(list)
+        groups: dict[Any, list[int]] = defaultdict(list)
         for sample_idx, label in enumerate(labels):
             groups[label].append(sample_idx)
 
+        # Keep labels with >= 2 samples; trim each to an even count so every
+        # label contributes complete pairs in the interleaving.
         self.groups = {
-            label: sample_indices[:num_samples]
-            for label, sample_indices in groups.items()
-            if (num_samples := len(sample_indices) // 2 * 2)
+            label: indices[: len(indices) // 2 * 2] for label, indices in groups.items() if len(indices) >= 2
         }
+        if len(self.groups) < 2:
+            raise ValueError(
+                "GroupByLabelBatchSampler requires at least 2 distinct labels with >= 2 samples each, "
+                f"but only {len(self.groups)} label(s) qualified."
+            )
+
+        # Pre-compute stream length: round-robin stops when only 1 label remains
+        pairs = sorted((len(idx) // 2 for idx in self.groups.values()), reverse=True)
+        cap = pairs[1]  # second-largest: the round when we'd drop to 1 label
+        self._stream_length = 2 * sum(min(p, cap) for p in pairs)
 
     @staticmethod
-    def _determine_labels_to_use(dataset: Dataset, valid_label_columns: list[str] | None) -> list[object]:
+    def _determine_labels_to_use(dataset: Dataset, valid_label_columns: list[str] | None) -> list[Any]:
         for column_name in valid_label_columns or []:
             if column_name in dataset.column_names:
                 return dataset[column_name]
@@ -149,18 +166,37 @@ class GroupByLabelBatchSampler(DefaultBatchSampler):
         if self.generator and self.seed is not None:
             self.generator.manual_seed(self.seed + self.epoch)
 
-        partial_batch = []
-        unique_labels = list(self.groups.keys())
-        for label_idx in torch.randperm(len(self.groups), generator=self.generator):
-            label = unique_labels[label_idx]
-            samples = self.groups[label]
-            partial_batch.extend(samples)
-            while len(partial_batch) >= self.batch_size:
-                yield partial_batch[: self.batch_size]
-                partial_batch = partial_batch[self.batch_size :]
+        # Shuffle samples within each label
+        queues: dict[Any, deque[int]] = {}
+        for label, indices in self.groups.items():
+            perm = torch.randperm(len(indices), generator=self.generator)
+            queues[label] = deque(indices[i] for i in perm)
 
-        if not self.drop_last and partial_batch:
-            yield partial_batch
+        # Round-robin: each label emits 2 samples per round; stop when < 2 labels remain.
+        # The label visit order is reshuffled every round for diverse batches.
+        remaining_labels = list(queues)
+        batch: list[int] = []
+        while len(remaining_labels) >= 2:
+            remaining_labels = [
+                remaining_labels[i] for i in torch.randperm(len(remaining_labels), generator=self.generator)
+            ]
+            for label in remaining_labels:
+                batch.append(queues[label].popleft())
+                batch.append(queues[label].popleft())
+                if len(batch) >= self.batch_size:
+                    yield batch[: self.batch_size]
+                    batch = batch[self.batch_size :]
+            remaining_labels = [label for label in remaining_labels if queues[label]]
+
+        # At least 4 elements ensures >= 2 distinct labels, each with >= 2 samples.
+        if not self.drop_last and len(batch) >= 4:
+            yield batch
+
+    def __len__(self) -> int:
+        n = self._stream_length // self.batch_size
+        if not self.drop_last and self._stream_length % self.batch_size >= 4:
+            n += 1
+        return n
 
 
 def _xxhash_int64(value: str) -> int:
@@ -172,7 +208,7 @@ def _xxhash_int64(value: str) -> int:
 
 
 def _hash_batch(
-    batch: dict[str, list[object]],
+    batch: dict[str, list[Any]],
     columns: list[str],
     exclude_columns: set[str],
 ) -> dict[str, list[list[int]]]:
