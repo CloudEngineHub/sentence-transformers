@@ -29,6 +29,7 @@ from sentence_transformers.sentence_transformer.evaluation import TranslationEva
 
 # Set the log level to INFO to get more information
 logging.basicConfig(format="%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S", level=logging.INFO)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 model_name = sys.argv[1]
 dataset_name = sys.argv[2]
