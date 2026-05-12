@@ -39,6 +39,7 @@ def main():
 
     # 1a. Load a model to finetune with 1b. (Optional) model card data and the cosine similarity function,
     # as most pretrained dense embedding models are trained with cosine similarity.
+    # Loading in fp32 is preferred for training if your memory can handle it
     model = SparseEncoder(
         model_name,
         model_card_data=SparseEncoderModelCardData(
@@ -46,6 +47,7 @@ def main():
             license="apache-2.0",
             model_name="Sparse CSR model trained on Natural Questions",
         ),
+        model_kwargs={"torch_dtype": "float32"},
         similarity_fn_name="cosine",
     )
 
