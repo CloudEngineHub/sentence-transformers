@@ -18,8 +18,8 @@ class SparseAnglELoss(SparseCoSENTLoss):
         This can hinder the optimization process, so AnglE proposes to instead optimize the angle difference
         in complex space in order to mitigate this effect.
 
-        It expects that each of the InputExamples consists of a pair of texts and a float valued label, representing
-        the expected similarity score between the pair.
+        It expects that each of the inputs consists of a pair of inputs (e.g., texts) and a float valued label,
+        representing the expected similarity score between the pair.
 
         It computes the following loss function:
 
@@ -38,13 +38,13 @@ class SparseAnglELoss(SparseCoSENTLoss):
 
         Requirements:
             - Need to be used in SpladeLoss or CSRLoss as a loss function.
-            - Sentence pairs with corresponding similarity scores in range of the similarity function. Default is [-1,1].
+            - Input pairs with corresponding similarity scores in range of the similarity function. Default is [-1,1].
 
         Inputs:
             +--------------------------------+------------------------+
-            | Texts                          | Labels                 |
+            | Inputs                         | Labels                 |
             +================================+========================+
-            | (sentence_A, sentence_B) pairs | float similarity score |
+            | (input_A, input_B) pairs       | float similarity score |
             +--------------------------------+------------------------+
 
         Relations:

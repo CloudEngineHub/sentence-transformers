@@ -17,9 +17,10 @@ class SparseCosineSimilarityLoss(CosineSimilarityLoss):
         cos_score_transformation: nn.Module = nn.Identity(),
     ) -> None:
         """
-        SparseCosineSimilarityLoss expects that the InputExamples consists of two texts and a float label. It computes the
-        vectors ``u = model(sentence_A)`` and ``v = model(sentence_B)`` and measures the cosine-similarity between the two.
-        By default, it minimizes the following loss: ``||input_label - cos_score_transformation(cosine_sim(u,v))||_2``.
+        SparseCosineSimilarityLoss expects that the inputs consists of a pair of inputs (e.g., texts) and a float label.
+        It computes the vectors ``u = model(input_A)`` and ``v = model(input_B)`` and measures the cosine-similarity
+        between the two. By default, it minimizes the following loss:
+        ``||input_label - cos_score_transformation(cosine_sim(u,v))||_2``.
 
         Args:
             model: SparseEncoder model
@@ -33,13 +34,13 @@ class SparseCosineSimilarityLoss(CosineSimilarityLoss):
 
         Requirements:
             - Need to be used in SpladeLoss or CSRLoss as a loss function.
-            - Sentence pairs with corresponding similarity scores in range `[0, 1]`
+            - Input pairs with corresponding similarity scores in range `[0, 1]`
 
         Inputs:
             +--------------------------------+------------------------+
-            | Texts                          | Labels                 |
+            | Inputs                         | Labels                 |
             +================================+========================+
-            | (sentence_A, sentence_B) pairs | float similarity score |
+            | (input_A, input_B) pairs       | float similarity score |
             +--------------------------------+------------------------+
 
         Relations:
