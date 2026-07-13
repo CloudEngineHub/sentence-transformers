@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from sentence_transformers.util.misc import import_module_class
+from sentence_transformers.util.misc import append_to_last_row, import_module_class
 
 
 def test_import_module_class_forwards_token_to_dynamic_module():
@@ -90,3 +90,38 @@ def test_import_module_class_local_path_with_trust_does_not_warn(tmp_path):
             )
 
     assert cls is fake_class
+
+
+@pytest.mark.parametrize(
+    ("content", "additional_data", "expected_return", "expected_content"),
+    [
+        pytest.param(
+            # Two data rows, so this pins the *last* one getting extended, not the first.
+            b"epoch,score\r\n0,0.5\r\n1,0.7\r\n",
+            ["0.9"],
+            True,
+            b"epoch,score\r\n0,0.5\r\n1,0.7,0.9\r\n",
+            id="appends-to-the-last-data-row",
+        ),
+        pytest.param(
+            # The sparse evaluators pass `sparsity_stats.values()`: a dict_values of floats, not a list of strings.
+            b"epoch,steps,accuracy\r\n-1,-1,0.83\r\n",
+            {"active_dims": 64.5, "sparsity_ratio": 0.99}.values(),
+            True,
+            b"epoch,steps,accuracy\r\n-1,-1,0.83,64.5,0.99\r\n",
+            id="appends-every-dict-value",
+        ),
+        # A header on its own isn't a data row, so there's nothing to append to.
+        pytest.param(b"epoch,score\r\n", ["0.9"], False, b"epoch,score\r\n", id="noop-on-header-only"),
+        pytest.param(b"", ["0.9"], False, b"", id="noop-on-empty-file"),
+    ],
+)
+def test_append_to_last_row(tmp_path, content, additional_data, expected_return, expected_content):
+    """Only writes when there's a header plus at least one data row, and then appends every value
+    to that row. Otherwise it no-ops and leaves the file untouched.
+    """
+    csv_path = tmp_path / "results.csv"
+    csv_path.write_bytes(content)
+
+    assert append_to_last_row(str(csv_path), additional_data) is expected_return
+    assert csv_path.read_bytes() == expected_content
