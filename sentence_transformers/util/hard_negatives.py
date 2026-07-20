@@ -478,7 +478,8 @@ def mine_hard_negatives(
         # Iterate over query embeddings in batches so we can track the progress
         for i in trange(0, len(query_embeddings), faiss_batch_size, desc="Querying FAISS index"):
             query_chunk = query_embeddings[i : i + faiss_batch_size]
-            scores, indices = index.search(query_chunk, k=range_max + 1)
+            # Keep the range_max + max_positives highest scores. We offset by max_positives to leave room for the positive pair(s).
+            scores, indices = index.search(query_chunk, k=range_max + max_positives)
             scores_list.append(scores)
             indices_list.append(indices)
         scores = torch.from_numpy(np.concatenate(scores_list, axis=0)).to(device)
@@ -559,6 +560,11 @@ def mine_hard_negatives(
         ).to(device)
         if use_multi_process:
             cross_encoder.stop_multi_process_pool(pool)
+
+    if use_faiss:
+        # FAISS pads short result sets with index -1, which would resolve to the last corpus entry.
+        # Applied after the CrossEncoder rescoring, as that overwrites the score of every candidate.
+        scores[indices == -1] = -float("inf")
 
     if not include_positives:
         # for each query, create a mask that is True for the positives and False for the negatives in the indices
