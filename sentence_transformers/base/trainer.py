@@ -368,6 +368,8 @@ class BaseTrainer(Trainer, ABC):
             preprocess_fn=model.preprocess,
             router_mapping=args.router_mapping,
             prompts=args.prompts,
+            # Only MultiVectorEncoderTrainingArguments defines max_length so far.
+            max_length=getattr(args, "max_length", None),
         )
 
     def add_model_card_callback(self, default_args_dict: dict[str, Any]) -> None:

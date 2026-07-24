@@ -1247,14 +1247,27 @@ class Transformer(InputModule):
             modality_kwargs["audio"]["padding"] = "max_length"
 
         # Apply the per-task max-length override for text inputs (e.g. ColBERT-style
-        # query_length/document_length). Caller-supplied processing_kwargs still wins below.
+        # query_length/document_length). A caller-supplied max_length (e.g. the trainer's
+        # args.max_length via the data collator) wins over the module lengths, and caller-supplied
+        # processing_kwargs still wins below.
         task = kwargs.get("task")
-        task_max_length = (
-            self.query_length if task == "query" else self.document_length if task == "document" else None
-        )
+        max_length_override = kwargs.get("max_length")
+        if max_length_override is not None:
+            task_max_length = max_length_override
+        elif task == "query":
+            task_max_length = self.query_length
+        elif task == "document":
+            task_max_length = self.document_length
+        else:
+            task_max_length = None
         # Expansion queries manage their own max_length below (they pad to the config length).
         # Skip the generic path for them.
         expansion = self.query_expansion if task == "query" else None
+        if expansion is not None and max_length_override is not None and max_length_override != expansion["length"]:
+            logger.warning_once(
+                f"query_expansion fixes queries to {expansion['length']} tokens, so the "
+                f"max_length={max_length_override} override is ignored for query batches."
+            )
         if task_max_length is not None and expansion is None:
             modality_kwargs["text"]["max_length"] = task_max_length
 

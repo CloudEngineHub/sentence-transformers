@@ -1137,6 +1137,20 @@ def test_pad_expansion_query_length_conflict_raises() -> None:
         transformer.query_expansion = {"strategy": "fixed", "length": 16}
 
 
+def test_max_length_override_loses_to_expansion_wins_elsewhere() -> None:
+    """The trainer's max_length cap (forwarded by the data collator) must lose to the expansion
+    width: expansion queries always tokenize to exactly the expansion length. Elsewhere the
+    override applies, winning over the module's own task lengths."""
+    model = MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
+    transformer = model[0]
+    transformer.query_expansion = {"strategy": "fixed", "length": 16}
+    features = transformer.preprocess(["short query"], task="query", max_length=8)
+    assert features["input_ids"].shape[1] == 16
+
+    document_features = transformer.preprocess(["a considerably longer document " * 10], task="document", max_length=8)
+    assert document_features["input_ids"].shape[1] == 8
+
+
 def test_prompt_length_ignores_query_expansion() -> None:
     """The prompt length feeds prompt-aware pooling and must report the prompt's own token count,
     not the expansion-padded width."""

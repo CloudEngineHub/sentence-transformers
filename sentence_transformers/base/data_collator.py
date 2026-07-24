@@ -32,6 +32,7 @@ class BaseDataCollator:
     valid_label_columns: list[str] = field(default_factory=lambda: list(DEFAULT_LABEL_COLUMNS))
     router_mapping: dict[str, str] | dict[str, dict[str, str]] | None = field(default_factory=dict, repr=False)
     prompts: str | dict[str, str] | dict[str, dict[str, str]] | None = field(default_factory=dict, repr=False)
+    max_length: int | dict[str, int] | None = field(default=None, repr=False)
 
     _warned_columns: set[tuple[str, ...]] = field(default_factory=set, init=False, repr=False)
 
@@ -84,6 +85,15 @@ class BaseDataCollator:
         """Resolve the task a column is preprocessed with. Subclasses may add positional defaults."""
         return router_mapping.get(column_name)
 
+    def _get_max_length_for_task(self, task: str | None) -> int | None:
+        """Resolve the training max-length override for a column: an int applies to every column,
+        a dict is keyed by task."""
+        if isinstance(self.max_length, int):
+            return self.max_length
+        if isinstance(self.max_length, dict) and task is not None:
+            return self.max_length.get(task)
+        return None
+
     def __call__(self, features: list[dict[str, Any]]) -> dict[str, Any]:
         if not features:
             return {}
@@ -122,7 +132,12 @@ class BaseDataCollator:
             task = self._get_task_for_column(column_name, column_position, router_mapping)
             prompt = self._get_prompt_for_column(prompts, column_name)
             inputs = [row[column_name] for row in features]
-            preprocessed = self.preprocess_fn(inputs, prompt=prompt, task=task)
+            max_length = self._get_max_length_for_task(task)
+            # Only forward the override when set, so preprocess_fns without **kwargs keep working.
+            if max_length is not None:
+                preprocessed = self.preprocess_fn(inputs, prompt=prompt, task=task, max_length=max_length)
+            else:
+                preprocessed = self.preprocess_fn(inputs, prompt=prompt, task=task)
             for key, value in preprocessed.items():
                 batch[f"{column_name}_{key}"] = value
             # Stamp the resolved task so losses can re-run the model under the task each column was
