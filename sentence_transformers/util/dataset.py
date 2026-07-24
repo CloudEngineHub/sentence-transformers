@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from collections.abc import Callable, Mapping
 from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
@@ -45,6 +46,30 @@ def _output_col(input_col: str, plural: bool = False) -> str:
         if input_col.endswith(suffix):
             return input_col.removesuffix(suffix) + replacement
     return input_col
+
+
+def _is_string_encoded_list(value: Any) -> bool:
+    return isinstance(value, str) and value.lstrip().startswith("[")
+
+
+def _parse_string_encoded_lists(column: list, col_name: str) -> list:
+    # Some KD datasets (e.g. lightonai/ms-marco-en-bge-gemma) store ID and score lists as strings.
+    parsed = []
+    for row in column:
+        try:
+            value = ast.literal_eval(row)
+        except (ValueError, SyntaxError) as e:
+            raise ValueError(
+                f"Column {col_name!r} looks like it holds string-encoded lists, but a row failed to "
+                f"parse ({e}): {row[:100]!r}"
+            ) from None
+        if not isinstance(value, (list, tuple)):
+            raise ValueError(
+                f"Column {col_name!r} looks like it holds string-encoded lists, but a row parsed to "
+                f"{type(value).__name__} instead of a list: {row[:100]!r}"
+            )
+        parsed.append(list(value))
+    return parsed
 
 
 def _take(ids: list, value_view, index: dict, value_col: str, input_col: str) -> list:
@@ -106,6 +131,8 @@ def _resolve_ids_batch(
                 "means the train dataset carries a format (e.g. with_format('numpy')). Call "
                 "dataset.with_format(None) before applying the transform."
             )
+        if len(column) > 0 and _is_string_encoded_list(column[0]):
+            column = _parse_string_encoded_lists(column, input_col)
         # Detect list-per-row vs single-per-row from the actual data. Uniform within a column.
         is_list = len(column) > 0 and isinstance(column[0], (list, tuple))
         if is_list and output_format == "columns":
@@ -148,6 +175,8 @@ def _resolve_ids_batch(
         if keep_col not in batch:
             continue
         values = batch[keep_col]
+        if len(values) > 0 and _is_string_encoded_list(values[0]):
+            values = _parse_string_encoded_lists(values, keep_col)
         # Sized but not a string covers lists as well as the arrays a formatted label column holds.
         is_row_sequence = len(values) > 0 and not isinstance(values[0], (str, bytes)) and hasattr(values[0], "__len__")
         if max_list_length is not None and is_row_sequence:

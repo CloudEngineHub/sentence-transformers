@@ -121,6 +121,38 @@ class TestListsOutputFormat:
         assert out == {"query": ["Q one"], "positive": ["A"]}
 
 
+class TestStringEncodedLists:
+    def test_kd_shape_with_string_encoded_ids_and_scores(self, queries: Dataset, documents: Dataset) -> None:
+        # The lightonai/ms-marco-en-bge-gemma layout: document_ids and scores stored as strings.
+        train = Dataset.from_dict(
+            {"query_id": ["q1"], "document_ids": ["['d1', 'd2', 'd3']"], "scores": ["[1.0, 0.5, 0.2]"]}
+        )
+        train.set_transform(resolve_ids({"query_id": queries, "document_ids": documents}))
+        assert train[0] == {
+            "query": "Q one",
+            "document_1": "A",
+            "document_2": "B",
+            "document_3": "C",
+            "scores": [1.0, 0.5, 0.2],
+        }
+
+    def test_string_encoded_integer_ids(self) -> None:
+        documents = Dataset.from_dict({"document_id": [100, 200], "text": ["A", "B"]})
+        transform = resolve_ids({"document_ids": documents})
+        out = transform({"document_ids": ["[200, 100]"]})
+        assert out == {"document_1": ["B"], "document_2": ["A"]}
+
+    def test_truncation_applies_to_parsed_columns(self, documents: Dataset) -> None:
+        transform = resolve_ids({"document_ids": documents}, max_list_length=1)
+        out = transform({"document_ids": ["['d1', 'd2']"], "scores": ["[0.9, 0.5]"]})
+        assert out == {"document_1": ["A"], "scores": [[0.9]]}
+
+    def test_malformed_string_raises(self, documents: Dataset) -> None:
+        transform = resolve_ids({"document_ids": documents})
+        with pytest.raises(ValueError, match="string-encoded lists"):
+            transform({"document_ids": ["[not valid python"]})
+
+
 class TestMaxListLength:
     def test_truncates_ids_and_list_labels_in_parallel(self, queries: Dataset, documents: Dataset) -> None:
         train = Dataset.from_dict(
@@ -279,11 +311,11 @@ class TestTransformTimeBehaviour:
             transform({"document_ids": [["d1", "d999"]]})
 
     def test_string_encoded_list_gets_a_hint(self, documents: Dataset) -> None:
-        # A string-encoded list column is looked up as one giant ID. The KeyError should point at
-        # the real cause instead of leaving the user with a baffling missing-ID message.
+        # Uniform string-encoded columns are parsed (TestStringEncodedLists). A mixed column slips
+        # past the row-0 detection, so the KeyError should still point at the real cause.
         transform = resolve_ids({"document_ids": documents})
         with pytest.raises(KeyError, match="string-encoded list"):
-            transform({"document_ids": ["['d1', 'd2']"]})
+            transform({"document_ids": ["d1", "['d1', 'd2']"]})
 
     def test_duplicate_lookup_ids_warn_and_resolve_to_last(self, caplog) -> None:
         duplicated = Dataset.from_dict({"document_id": ["d1", "d1"], "text": ["first", "SECOND"]})
