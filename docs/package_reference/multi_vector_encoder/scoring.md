@@ -24,6 +24,10 @@ top-k scoring.
 ```
 
 ```{eval-rst}
+.. autofunction:: sentence_transformers.multi_vector_encoder.scoring.xtr_scores_pairwise
+```
+
+```{eval-rst}
 .. autofunction:: sentence_transformers.multi_vector_encoder.scoring.xtr_kd_scores
 ```
 
