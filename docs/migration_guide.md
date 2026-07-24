@@ -21,7 +21,7 @@ punctuation skiplist recovered from the saved config.
 | `model.encode(..., is_query=True)` | `model.encode_query(...)` |
 | `model.encode(..., is_query=False)` | `model.encode_document(...)` |
 | `query_prefix="[Q] "` / `document_prefix="[D] "` | `prompts={"query": "[Q] ", "document": "[D] "}` |
-| `attend_to_expansion_tokens=True` | `query_expansion={"strategy": "pad_attend", "length": 32}` on the `Transformer` module |
+| `attend_to_expansion_tokens=True` | `query_expansion={"strategy": "fixed", "attend": True, "length": 32}` on the `Transformer` module |
 | `pylate.scores.colbert_scores` | `model.similarity` or `sentence_transformers.util.maxsim` |
 | `pylate.losses.Contrastive` | `MultiVectorMultipleNegativesRankingLoss` |
 | `pylate.losses.CachedContrastive` | `CachedMultiVectorMultipleNegativesRankingLoss` |

@@ -710,13 +710,13 @@ class TestForward:
             assert transformer.preprocess([long_text], task=task)["input_ids"].shape[1] > 6
 
     def test_expansion_pad_contract_survives_processing_kwargs(self, bert_tiny_transformer, monkeypatch):
-        """A processing_kwargs padding/max_length override must not silently break pad_* expansion's
+        """A processing_kwargs padding/max_length override must not silently break the expansion's
         fixed width (which would make query embeddings depend on batch composition): the expansion
         contract is re-applied with a warning."""
         import sentence_transformers.base.modules.transformer as transformer_module
 
         transformer = bert_tiny_transformer
-        monkeypatch.setattr(transformer, "query_expansion", {"strategy": "pad_skip", "token": None, "length": 16})
+        monkeypatch.setattr(transformer, "query_expansion", {"strategy": "fixed", "token": None, "length": 16})
         warnings: list[str] = []
         monkeypatch.setattr(transformer_module.logger, "warning_once", warnings.append)
 

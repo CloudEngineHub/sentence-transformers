@@ -119,12 +119,13 @@ If you're using a GPU, then you can use the following options to speed up your i
 
    .. warning::
 
-      Models with ``pad_skip`` query expansion (e.g. Stanford-NLP checkpoints like ``colbert-ir/colbertv2.0`` and
-      ``answerdotai/answerai-colbert-small-v1``) reject Flash Attention at load time: Flash Attention strips
-      ``attention_mask=0`` positions, so the ``[MASK]`` expansion tokens used by MaxSim would never receive an
-      attention update. For those models, use ``"sdpa"`` (preserves semantics) or switch the model to
-      ``query_expansion={"strategy": "pad_attend", ...}`` (changes semantics, requires re-evaluation). Models with
-      ``pad_attend`` expansion (e.g. ``lightonai/GTE-ModernColBERT-v1``) work with Flash Attention out of the box.
+      Models with non-attend query expansion (``attend=False``, e.g. Stanford-NLP checkpoints like
+      ``colbert-ir/colbertv2.0`` and ``answerdotai/answerai-colbert-small-v1``) reject Flash Attention at load
+      time: Flash Attention strips ``attention_mask=0`` positions, so the ``[MASK]`` expansion tokens used by
+      MaxSim would never receive an attention update. For those models, use ``"sdpa"`` (preserves semantics) or
+      switch the model to ``query_expansion={..., "attend": True}`` (changes semantics, requires re-evaluation).
+      Models with ``attend=True`` expansion (e.g. ``lightonai/GTE-ModernColBERT-v1``) work with Flash Attention
+      out of the box.
 
    Input unpadding can be controlled via :attr:`~sentence_transformers.base.modules.transformer.Transformer.unpad_inputs`
    on the underlying :class:`~sentence_transformers.base.modules.transformer.Transformer` module:
@@ -616,7 +617,7 @@ The following images show the benchmark results for the different backends on GP
          fp16 with FlashAttention-2 is the best of both worlds: the highest speedup measured (2.44x) with no quality loss, making it the recommended GPU configuration when the model supports FlashAttention-2.
       </li>
       <li>
-         The FA2 performance bar covers GTE-ModernColBERT only: models with pad_skip query expansion (e.g. answerai-colbert, Stanford-NLP checkpoints) cannot encode queries with FlashAttention-2 at all, as the expansion tokens would never receive an attention update. Their document-side encoding speed is unaffected, which is what the speedup bar measures.
+         The FA2 performance bar covers GTE-ModernColBERT only: models with non-attend query expansion (attend=False, e.g. answerai-colbert, Stanford-NLP checkpoints) cannot encode queries with FlashAttention-2 at all, as the expansion tokens would never receive an attention update. Their document-side encoding speed is unaffected, which is what the speedup bar measures.
       </li>
       <li>
          ONNX loses to PyTorch on CPU for longer texts: ONNX throughput declines as the batch size grows on the medium and long datasets, ending below PyTorch (0.80x median). OpenVINO does not show this decline: its throughput rises or stays flat everywhere. Half precision is not benchmarked on CPU here, but as for the other model types it runs many times slower than fp32 there, so avoid torch-fp16 and torch-bf16 on CPU.
@@ -667,7 +668,7 @@ Based on the benchmarks, this flowchart should help you decide which backend to 
 
 .. note::
 
-   Your mileage may vary, and you should always test the different backends with your specific model and data to find the best one for your use case. For example, models with ``pad_skip`` query expansion (such as Stanford-NLP ColBERT checkpoints) reject FlashAttention-2, and bf16 quality losses are model-specific.
+   Your mileage may vary, and you should always test the different backends with your specific model and data to find the best one for your use case. For example, models with non-attend query expansion (such as Stanford-NLP ColBERT checkpoints) reject FlashAttention-2, and bf16 quality losses are model-specific.
 
 User Interface
 ^^^^^^^^^^^^^^

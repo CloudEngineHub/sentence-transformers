@@ -518,20 +518,24 @@ class QueryExpansionConfig(TypedDict):
 
     * ``strategy``:
 
-      - ``"pad_skip"`` (classic ColBERT): pad queries to ``length``, swap pads for ``token``
-        (defaults to the tokenizer's ``mask_token``), and leave them at ``attention_mask=0`` so
-        the encoder skips them in the forward pass. MaxSim still scores them, the expansion
-        positions soak up query context via the asymmetric attention mask.
-      - ``"pad_attend"``: same as ``"pad_skip"`` but force ``attention_mask=1`` at expansion
-        positions so the encoder also attends to them. Used by some ColBERT variants.
+      - ``"fixed"`` (classic ColBERT): every query leaves preprocessing at exactly ``length``
+        tokens. Shorter queries are padded up to ``length`` and the pads swapped for ``token``
+        (defaults to the tokenizer's ``mask_token``), longer queries are truncated down to it.
+        ``length`` is both the floor and the ceiling: for query batches it overrides
+        ``Transformer.query_length``.
+
+    * ``attend``: whether the encoder attends to the expansion positions. ``False`` (default,
+      classic ColBERT) leaves them at ``attention_mask=0``: the encoder skips them in the forward
+      pass, MaxSim still scores them, and they soak up query context via the asymmetric attention
+      mask. ``True`` forces ``attention_mask=1`` so the encoder also attends to them, matching
+      PyLate's ``attend_to_expansion_tokens``. Used by some ColBERT variants.
 
     * ``token``: defaults to the tokenizer's ``mask_token``.
 
     * ``length``: pad target (total tokens after expansion). **Required** (classic ColBERT uses
-      32). This is separate from ``Transformer.query_length`` (a content-cap for truncation), so
-      the same knob doesn't quietly serve two purposes.
+      32).
 
-    Both strategies exist for classic mask-token checkpoints (PyLate / Stanford-NLP ColBERT):
+    Query expansion exists for classic mask-token checkpoints (PyLate / Stanford-NLP ColBERT):
     their attention-mask surgery and fixed-length pad target cannot be expressed in a chat
     template. Modern chat-template backbones (the colpali-engine ColQwen / ColGemma / ColIdefics
     families) should instead own their query augmentation in the checkpoint's chat template,
@@ -539,13 +543,14 @@ class QueryExpansionConfig(TypedDict):
     ``task == "query"`` renders.
     """
 
-    strategy: Literal["pad_skip", "pad_attend"]
+    strategy: Literal["fixed"]
+    attend: NotRequired[bool]
     token: NotRequired[str | None]
     length: NotRequired[int]
 
 
-_VALID_QUERY_EXPANSION_KEYS: set[str] = {"strategy", "token", "length"}
-_VALID_QUERY_EXPANSION_STRATEGIES: tuple[str, ...] = ("pad_skip", "pad_attend")
+_VALID_QUERY_EXPANSION_KEYS: set[str] = {"strategy", "attend", "token", "length"}
+_VALID_QUERY_EXPANSION_STRATEGIES: tuple[str, ...] = ("fixed",)
 
 
 def _normalize_query_expansion(
@@ -567,8 +572,11 @@ def _normalize_query_expansion(
         raise ValueError(
             f"query_expansion['strategy'] must be one of {_VALID_QUERY_EXPANSION_STRATEGIES!r}, got {strategy!r}."
         )
+    attend = query_expansion.get("attend", False)
+    if not isinstance(attend, bool):
+        raise ValueError(f"query_expansion['attend'] must be a bool, got {attend!r}.")
     token = query_expansion.get("token")
-    normalized: QueryExpansionConfig = {"strategy": strategy, "token": token}
+    normalized: QueryExpansionConfig = {"strategy": strategy, "attend": attend, "token": token}
     length = query_expansion.get("length")
     if not isinstance(length, int) or isinstance(length, bool) or length < 1:
         raise ValueError(
@@ -933,7 +941,7 @@ class Transformer(InputModule):
         self.unpad_inputs = unpad_inputs
 
         # ColBERT-style query expansion. The setter normalizes the dict, fills defaults, and
-        # runs the FA2 compatibility check for the pad_skip strategy.
+        # runs the FA2 compatibility check for non-attend expansion.
         self.query_expansion = query_expansion
 
     @property
@@ -967,7 +975,7 @@ class Transformer(InputModule):
         """ColBERT-style query expansion config. See :class:`QueryExpansionConfig`. Validated and
         normalized on assignment, so re-setting after construction is safe::
 
-            model[0].query_expansion = {"strategy": "pad_attend", "length": 32}
+            model[0].query_expansion = {"strategy": "fixed", "attend": True, "length": 32}
             model[0].query_expansion = None  # turn off
         """
         return self._query_expansion
@@ -978,12 +986,12 @@ class Transformer(InputModule):
         # ``model`` may not exist yet during very early init. Skip tokenizer + FA2 checks until it does.
         if expansion is not None and getattr(self, "model", None) is not None:
             self._validate_query_expansion_token(expansion)
-            if expansion["strategy"] == "pad_skip" and self._is_flash_attention_requested():
+            if not expansion["attend"] and self._is_flash_attention_requested():
                 raise ValueError(
-                    "FlashAttention-2 is incompatible with query_expansion strategy='pad_skip'. "
+                    "FlashAttention-2 is incompatible with query_expansion attend=False. "
                     "FA2 strips attention_mask=0 positions, so the [MASK] expansion tokens used by MaxSim "
                     "never receive an attention update. Pass attn_implementation='sdpa' (preserves semantics) "
-                    "or switch to strategy='pad_attend' (changes semantics)."
+                    "or set attend=True (changes semantics)."
                 )
         # Expansion tokenizes with max_length=length, so a smaller query_length content cap is
         # inexpressible: raise instead of silently ignoring it.
@@ -991,9 +999,9 @@ class Transformer(InputModule):
         if expansion is not None and query_length is not None and query_length < expansion["length"]:
             raise ValueError(
                 f"query_length={query_length} is smaller than query_expansion['length']={expansion['length']}. "
-                "With the pad_skip / pad_attend strategies, queries are tokenized directly to the expansion "
-                "length, so a smaller query_length content cap is not applied. Drop query_length, raise it to "
-                "at least the expansion length, or lower the expansion length."
+                "With strategy='fixed', queries are tokenized directly to the expansion length, so a smaller "
+                "query_length content cap is not applied. Drop query_length, raise it to at least the "
+                "expansion length, or lower the expansion length."
             )
         self._query_expansion = expansion
 
@@ -1001,9 +1009,8 @@ class Transformer(InputModule):
         """Tokenizer-aware checks. The structural ``_normalize_query_expansion`` runs without the
         tokenizer, so this method catches the two silent-wrong-behavior cases that require it:
 
-        * ``pad_*`` strategies with ``token=None`` fall back to ``mask_token_id``, then
-          ``eos_token_id``. If the tokenizer has neither, the preprocess swap silently no-ops and
-          the encoder sees raw pad tokens.
+        * ``token=None`` falls back to ``mask_token_id``, then ``eos_token_id``. If the tokenizer
+          has neither, the preprocess swap silently no-ops and the encoder sees raw pad tokens.
         * An explicit ``token`` that isn't in the tokenizer's vocabulary resolves to
           ``unk_token_id`` (or ``None``), silently inserting unk tokens at expansion positions.
         """
@@ -1012,7 +1019,7 @@ class Transformer(InputModule):
         strategy = expansion["strategy"]
         token = expansion["token"]
         if token is None:
-            # pad_skip / pad_attend fall back to mask_token, then eos_token (PyLate's chain:
+            # token=None falls back to mask_token, then eos_token (PyLate's chain:
             # [MASK] for encoder models, EOS for decoder models without one).
             if self.tokenizer.mask_token_id is None and self.tokenizer.eos_token_id is None:
                 raise ValueError(
@@ -1245,7 +1252,7 @@ class Transformer(InputModule):
         task_max_length = (
             self.query_length if task == "query" else self.document_length if task == "document" else None
         )
-        # Expansion queries manage their own max_length below (pad_* pads to the config length).
+        # Expansion queries manage their own max_length below (they pad to the config length).
         # Skip the generic path for them.
         expansion = self.query_expansion if task == "query" else None
         if task_max_length is not None and expansion is None:
@@ -1258,13 +1265,13 @@ class Transformer(InputModule):
             if overrides := effective_processing_kwargs.get(modality_key):  # type: ignore[arg-type]
                 modality_kwargs[modality_key].update(overrides)
 
-        # pad_skip / pad_attend: pad to the expansion length so the post-tokenization swap below has
+        # strategy='fixed': pad to the expansion length so the post-tokenization swap below has
         # pad positions to replace. Applied after the merge so processing_kwargs can't break the fixed width.
         if expansion is not None:
             text_overrides = effective_processing_kwargs.get("text") or {}
             if "padding" in text_overrides or "max_length" in text_overrides:
                 logger.warning_once(
-                    "processing_kwargs overrides the text padding or max_length, but pad_* query "
+                    "processing_kwargs overrides the text padding or max_length, but query "
                     "expansion requires a fixed width: re-applying padding='max_length' with the "
                     "expansion length for query batches."
                 )
@@ -1370,7 +1377,7 @@ class Transformer(InputModule):
             self._verify_left_padding(processor_output, modality_kwargs, common_kwargs)
             processor_output["logits_to_keep"] = 1
 
-        # ColBERT-style query expansion (pad_skip / pad_attend): swap pad positions for the expansion
+        # ColBERT-style query expansion: swap pad positions for the expansion
         # token id so the encoder produces expansion-token embeddings there. The
         # ``query_expansion_positions`` mask below tells downstream modules to score those positions.
         is_query = task == "query"
@@ -1401,9 +1408,9 @@ class Transformer(InputModule):
         # as a per-batch flag so expansion strategies without fixed-width rows stay expressible.
         if expansion is not None and "attention_mask" in processor_output:
             processor_output["query_expansion_positions"] = processor_output["attention_mask"] == 0
-        # ``pad_attend`` forces attention_mask=1 at expansion positions so the encoder attends to
-        # them. ``pad_skip`` leaves them at 0 (the classic ColBERT "skip during forward" trick).
-        if expansion is not None and expansion["strategy"] == "pad_attend" and "attention_mask" in processor_output:
+        # ``attend=True`` forces attention_mask=1 at expansion positions so the encoder attends to
+        # them. ``attend=False`` leaves them at 0 (the classic ColBERT "skip during forward" trick).
+        if expansion is not None and expansion["attend"] and "attention_mask" in processor_output:
             processor_output["attention_mask"] = torch.ones_like(processor_output["attention_mask"])
 
         return processor_output

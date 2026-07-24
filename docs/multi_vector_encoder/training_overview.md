@@ -96,7 +96,7 @@ Note that this default leaves the classic ColBERT tokenization tricks off: no ``
 
     transformer = Transformer(
         "answerdotai/ModernBERT-base",
-        query_expansion={"strategy": "pad_skip", "length": 32},  # pad queries to 32 tokens with [MASK], truncate longer ones
+        query_expansion={"strategy": "fixed", "length": 32},  # pad queries to 32 tokens with [MASK], truncate longer ones
         document_length=300,  # also truncate (not pad) documents to 300 tokens
         model_kwargs={"torch_dtype": "float32"},
     )

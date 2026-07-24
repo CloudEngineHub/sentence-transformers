@@ -298,8 +298,8 @@ def test_get_n_patches_unknown_family_raises() -> None:
         get_n_patches(model, (640, 480))
 
 
-def test_real_query_token_slice_with_pad_expansion() -> None:
-    """pad_skip / pad_attend render the empty and real query to the same padded length, so the
+def test_real_query_token_slice_with_query_expansion() -> None:
+    """Fixed-width expansion renders the empty and real query to the same padded length, so the
     naive length diff is always 0. The slice must still select the real content tokens."""
     from sentence_transformers import MultiVectorEncoder
     from sentence_transformers.multi_vector_encoder.interpretability import real_query_token_slice
@@ -308,9 +308,9 @@ def test_real_query_token_slice_with_pad_expansion() -> None:
     query = "What is the capital of France?"
     plain_content = len(model.tokenizer(query, add_special_tokens=False)["input_ids"])
 
-    for strategy in ("pad_skip", "pad_attend"):
-        model[0].query_expansion = {"strategy": strategy, "length": 32}
+    for attend in (False, True):
+        model[0].query_expansion = {"strategy": "fixed", "attend": attend, "length": 32}
         token_slice = real_query_token_slice(model, query)
-        assert token_slice.stop - token_slice.start == plain_content, strategy
+        assert token_slice.stop - token_slice.start == plain_content, attend
         query_embedding = model.encode_query([query], convert_to_tensor=True)[0][token_slice]
         assert query_embedding.shape[0] == plain_content

@@ -32,7 +32,7 @@ def model_dir(tmp_path_factory) -> str:
     # The tiny checkpoint gets a randomly initialised projection on conversion, so save it once
     # and reload from disk per backend. Otherwise every load would produce different embeddings.
     model = MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
-    model[0].query_expansion = {"strategy": "pad_skip", "length": 16}
+    model[0].query_expansion = {"strategy": "fixed", "length": 16}
     save_dir = str(tmp_path_factory.mktemp("mve_backends") / "mve-tiny")
     model.save_pretrained(save_dir)
     return save_dir

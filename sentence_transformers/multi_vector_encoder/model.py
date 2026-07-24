@@ -711,11 +711,10 @@ class MultiVectorEncoder(BaseModel):
                 # PyLate saves the flag as ``attend_to_expansion_tokens``. ``attend_to_mask_tokens`` is
                 # the Stanford artifact.metadata spelling, kept as a fallback for hand-written configs.
                 attend = model_config.get("attend_to_expansion_tokens", model_config.get("attend_to_mask_tokens"))
-                strategy = "pad_attend" if attend else "pad_skip"
                 # PyLate stored the pad target as ``query_length``. Move it into the expansion config
                 # where it now belongs. Fall back to the canonical ColBERT default of 32.
                 length = pylate_knobs.pop("query_length", None) or model_config.get("query_length") or 32
-                pylate_knobs["query_expansion"] = {"strategy": strategy, "length": length}
+                pylate_knobs["query_expansion"] = {"strategy": "fixed", "attend": bool(attend), "length": length}
         self._legacy.transformer_config.update(pylate_knobs)
         self._legacy.skiplist_words = model_config.get("skiplist_words")
 
@@ -953,9 +952,11 @@ class MultiVectorEncoder(BaseModel):
             self._legacy.transformer_config.setdefault("document_length", metadata["doc_maxlen"])
         # Stanford-NLP ColBERT always [MASK]-expands queries (core scoring trick, not in ``artifact.metadata``).
         # ``query_maxlen`` is the pad target and now lives in the expansion config. 32 is the canonical default.
-        strategy = "pad_attend" if metadata.get("attend_to_mask_tokens") else "pad_skip"
+        attend = bool(metadata.get("attend_to_mask_tokens"))
         length = metadata.get("query_maxlen") or 32
-        self._legacy.transformer_config.setdefault("query_expansion", {"strategy": strategy, "length": length})
+        self._legacy.transformer_config.setdefault(
+            "query_expansion", {"strategy": "fixed", "attend": attend, "length": length}
+        )
         # Stanford-NLP's ``--mask-punctuation`` CLI flag defaults to ``False`` (``store_true``). Follow that for missing keys.
         self._legacy.skiplist_words = list(string.punctuation) if metadata.get("mask_punctuation", False) else []
 

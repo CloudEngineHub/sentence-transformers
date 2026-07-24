@@ -59,7 +59,7 @@ def test_encode_query_pads_to_expansion_length() -> None:
     # Opt into query expansion at construction time. Queries pad to expansion["length"].
     base = "sentence-transformers-testing/stsb-bert-tiny-safetensors"
     model = MultiVectorEncoder(base)
-    model[0].query_expansion = {"strategy": "pad_skip", "length": 16}
+    model[0].query_expansion = {"strategy": "fixed", "length": 16}
     emb = model.encode_query(["short query"])
     assert len(emb) == 1
     assert emb[0].shape[0] == 16
@@ -125,18 +125,18 @@ def test_query_expansion_unknown_key_raises() -> None:
     with pytest.raises(ValueError, match="unknown keys"):
         Transformer(
             "sentence-transformers-testing/stsb-bert-tiny-safetensors",
-            query_expansion={"strategy": "pad_skip", "length": 32, "garbage_key": True},
+            query_expansion={"strategy": "fixed", "length": 32, "garbage_key": True},
         )
 
 
-def test_query_expansion_pad_strategy_requires_length() -> None:
-    # pad_skip / pad_attend need an explicit pad target. Without it, silent 16× compute blowup
+def test_query_expansion_requires_length() -> None:
+    # Expansion needs an explicit pad target. Without it, silent 16× compute blowup
     # would follow (audit #1). Catch at construction with a helpful error.
-    for strategy in ("pad_skip", "pad_attend"):
+    for attend in (False, True):
         with pytest.raises(ValueError, match="requires 'length'"):
             Transformer(
                 "sentence-transformers-testing/stsb-bert-tiny-safetensors",
-                query_expansion={"strategy": strategy},
+                query_expansion={"strategy": "fixed", "attend": attend},
             )
 
 
@@ -146,27 +146,27 @@ def test_query_expansion_rejects_count_key() -> None:
     with pytest.raises(ValueError, match="unknown keys"):
         Transformer(
             "sentence-transformers-testing/stsb-bert-tiny-safetensors",
-            query_expansion={"strategy": "pad_skip", "length": 32, "count": 5},
+            query_expansion={"strategy": "fixed", "length": 32, "count": 5},
         )
 
 
-def test_query_expansion_pad_strategy_requires_mask_or_eos_token() -> None:
-    # ``pad_skip`` / ``pad_attend`` with token=None fall back to tokenizer.mask_token, then
-    # eos_token (PyLate's chain: [MASK] for encoders, EOS for decoder-only models such as
-    # LFM2-ColBERT). If the tokenizer has neither, the silent-no-op swap would send pads through
-    # the encoder. Caught at construction with a helpful error.
+def test_query_expansion_requires_mask_or_eos_token() -> None:
+    # ``token=None`` falls back to tokenizer.mask_token, then eos_token (PyLate's chain: [MASK]
+    # for encoders, EOS for decoder-only models such as LFM2-ColBERT). If the tokenizer has
+    # neither, the silent-no-op swap would send pads through the encoder. Caught at construction
+    # with a helpful error.
     transformer = Transformer("sentence-transformers-testing/stsb-bert-tiny-safetensors")
     original_mask = transformer.tokenizer.mask_token
     original_mask_id = transformer.tokenizer.mask_token_id
     transformer.tokenizer.mask_token = None
     try:
         with pytest.raises(ValueError, match="has neither"):
-            transformer.query_expansion = {"strategy": "pad_skip", "length": 32}
+            transformer.query_expansion = {"strategy": "fixed", "length": 32}
         with pytest.raises(ValueError, match="has neither"):
-            transformer.query_expansion = {"strategy": "pad_attend", "length": 32}
+            transformer.query_expansion = {"strategy": "fixed", "attend": True, "length": 32}
         # With an EOS token but no mask token, the EOS fallback applies and construction passes.
         transformer.tokenizer.eos_token = "[SEP]"
-        transformer.query_expansion = {"strategy": "pad_skip", "length": 32}
+        transformer.query_expansion = {"strategy": "fixed", "length": 32}
     finally:
         transformer.tokenizer.eos_token = None
         transformer.tokenizer.mask_token = original_mask
@@ -179,7 +179,7 @@ def test_query_expansion_token_not_in_vocab_raises() -> None:
     with pytest.raises(ValueError, match="vocabulary"):
         Transformer(
             "sentence-transformers-testing/stsb-bert-tiny-safetensors",
-            query_expansion={"strategy": "pad_skip", "length": 32, "token": "<not_a_real_token>"},
+            query_expansion={"strategy": "fixed", "length": 32, "token": "<not_a_real_token>"},
         )
 
 
@@ -228,7 +228,7 @@ def test_query_expansion_setter_validates_post_init() -> None:
     with pytest.raises(ValueError, match="strategy"):
         model[0].query_expansion = {"strategy": "bogus"}
     with pytest.raises(ValueError, match="unknown keys"):
-        model[0].query_expansion = {"strategy": "pad_skip", "garbage_key": True}
+        model[0].query_expansion = {"strategy": "fixed", "garbage_key": True}
     # The original state is preserved across the failed assignments.
     assert model[0].query_expansion is None
 
@@ -388,27 +388,33 @@ def test_stanford_metadata_seeds_skiplist_from_mask_punctuation(monkeypatch, tmp
 @pytest.mark.parametrize(
     ("model_config", "expected_qe"),
     [
-        # PyLate marker present, expansion not pinned -> default to pad_skip and move query_length in.
-        ({"query_length": 32}, {"strategy": "pad_skip", "length": 32}),
+        # PyLate marker present, expansion not pinned -> default to attend=False and move query_length in.
+        ({"query_length": 32}, {"strategy": "fixed", "attend": False, "length": 32}),
         # PyLate-shape ``do_query_expansion=False`` translates to "explicitly off".
         ({"query_length": 32, "do_query_expansion": False}, None),
-        # PyLate saves ``attend_to_expansion_tokens=True``: selects pad_attend, still moves length in.
-        ({"query_length": 32, "attend_to_expansion_tokens": True}, {"strategy": "pad_attend", "length": 32}),
+        # PyLate saves ``attend_to_expansion_tokens=True``: selects attend=True, still moves length in.
+        (
+            {"query_length": 32, "attend_to_expansion_tokens": True},
+            {"strategy": "fixed", "attend": True, "length": 32},
+        ),
         # PyLate saves the flag off explicitly too.
-        ({"query_length": 32, "attend_to_expansion_tokens": False}, {"strategy": "pad_skip", "length": 32}),
+        (
+            {"query_length": 32, "attend_to_expansion_tokens": False},
+            {"strategy": "fixed", "attend": False, "length": 32},
+        ),
         # The Stanford artifact.metadata spelling is honored as a fallback for hand-written configs.
-        ({"query_length": 32, "attend_to_mask_tokens": True}, {"strategy": "pad_attend", "length": 32}),
+        ({"query_length": 32, "attend_to_mask_tokens": True}, {"strategy": "fixed", "attend": True, "length": 32}),
         # An explicit query_expansion dict is preserved as-is (no query_length move).
         (
-            {"query_length": 48, "query_expansion": {"strategy": "pad_attend", "token": ".", "length": 64}},
-            {"strategy": "pad_attend", "token": ".", "length": 64},
+            {"query_length": 48, "query_expansion": {"strategy": "fixed", "attend": True, "token": ".", "length": 64}},
+            {"strategy": "fixed", "attend": True, "token": ".", "length": 64},
         ),
         # An explicit None for query_expansion is preserved (means "explicitly off").
         ({"query_length": 32, "query_expansion": None}, None),
         # No PyLate markers (bare ST save) -> leave it unset so the Transformer keeps its own default.
         ({"similarity_fn_name": "maxsim"}, "absent"),
         # A null query_length is filtered out. Falls back to the canonical ColBERT default of 32.
-        ({"query_length": None}, {"strategy": "pad_skip", "length": 32}),
+        ({"query_length": None}, {"strategy": "fixed", "attend": False, "length": 32}),
     ],
 )
 def test_parse_model_config_translates_pylate_expansion(model_config, expected_qe) -> None:
@@ -733,8 +739,8 @@ def test_parse_model_config_reads_back_supported_similarity() -> None:
     assert fresh._similarity_fn_name is None
 
 
-@pytest.mark.parametrize("strategy", ["pad_skip", "pad_attend"])
-def test_query_expansion_records_per_position_mask(strategy: str) -> None:
+@pytest.mark.parametrize("attend", [False, True])
+def test_query_expansion_records_per_position_mask(attend: bool) -> None:
     """Preprocess records WHICH positions hold expansion tokens as a ``(B, T)`` mask (not a
     per-batch bool), and the scoring mask force-includes exactly those positions on top of the
     real tokens."""
@@ -742,7 +748,7 @@ def test_query_expansion_records_per_position_mask(strategy: str) -> None:
     transformer = model[0]
     n_real = transformer.preprocess(["short query"], task="query")["input_ids"].shape[1]
 
-    transformer.query_expansion = {"strategy": strategy, "length": 16}
+    transformer.query_expansion = {"strategy": "fixed", "attend": attend, "length": 16}
     features = transformer.preprocess(["short query"], task="query")
     positions = features["query_expansion_positions"]
     assert positions.dtype == torch.bool
@@ -752,7 +758,7 @@ def test_query_expansion_records_per_position_mask(strategy: str) -> None:
     assert int(positions.sum()) == 16 - n_real
     assert (features["input_ids"][positions] == transformer.tokenizer.mask_token_id).all()
 
-    # attention OR expansion covers every position for the fixed-width pad_* strategies.
+    # attention OR expansion covers every position with strategy='fixed'.
     scored = model[2].forward(dict(features), task="query")
     assert scored["attention_mask"].all()
     assert scored["attention_mask"].shape == (1, 16)
@@ -761,7 +767,7 @@ def test_query_expansion_records_per_position_mask(strategy: str) -> None:
 def test_multi_vector_mask_respects_partial_expansion_positions() -> None:
     """The scoring mask force-includes only the marked positions: a position that is neither a real
     token nor marked as expansion stays excluded (the old per-batch bool blanket-included every
-    position, which only worked for fixed-width pad_* rows)."""
+    position, which only worked for fixed-width expansion rows)."""
     mask_module = MultiVectorMask()
     features = {
         "input_ids": torch.tensor([[1, 2, 3, 4]]),
@@ -805,7 +811,7 @@ def test_user_constructed_model_with_prefix_prompts_round_trips() -> None:
         base,
         query_length=16,
         document_length=32,
-        query_expansion={"strategy": "pad_skip", "length": 16},
+        query_expansion={"strategy": "fixed", "length": 16},
     )
     hidden = transformer.get_embedding_dimension()
     model = MultiVectorEncoder(
@@ -881,7 +887,7 @@ def test_pylate_shape_save_round_trips_to_new_query_expansion(tmp_path) -> None:
     base = "sentence-transformers-testing/stsb-bert-tiny-safetensors"
 
     native = MultiVectorEncoder(base)
-    native[0].query_expansion = {"strategy": "pad_attend", "length": 24}
+    native[0].query_expansion = {"strategy": "fixed", "attend": True, "length": 24}
     q_native = native.encode_query(["some query text"], convert_to_tensor=True)[0]
 
     native.save_pretrained(str(tmp_path))
@@ -891,14 +897,14 @@ def test_pylate_shape_save_round_trips_to_new_query_expansion(tmp_path) -> None:
     config.pop("query_expansion", None)
     config["query_length"] = 24
     config["do_query_expansion"] = True
-    config["attend_to_expansion_tokens"] = True  # PyLate's spelling -> pad_attend, not pad_skip
+    config["attend_to_expansion_tokens"] = True  # PyLate's spelling -> attend=True
     config_path.write_text(json.dumps(config))
 
     # Reload triggers the PyLate translation path in ``_parse_model_config``.
     reloaded = MultiVectorEncoder(str(tmp_path))
 
     # Legacy ``query_length`` + ``do_query_expansion`` translated into the new-shape dict.
-    assert reloaded[0].query_expansion == {"strategy": "pad_attend", "token": None, "length": 24}
+    assert reloaded[0].query_expansion == {"strategy": "fixed", "attend": True, "token": None, "length": 24}
     # ``query_length`` moved into the expansion config, no longer at top level.
     assert reloaded[0].query_length is None
 
@@ -1122,13 +1128,13 @@ def test_multimodal_smoke_image_document_through_mve() -> None:
 
 
 def test_pad_expansion_query_length_conflict_raises() -> None:
-    """With pad_* strategies, queries tokenize directly to the expansion length, so a smaller
+    """With strategy='fixed', queries tokenize directly to the expansion length, so a smaller
     query_length content cap is inexpressible and fails loud when the expansion is assigned."""
     model = MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
     transformer = model[0]
     transformer.query_length = 8
     with pytest.raises(ValueError, match="query_length=8"):
-        transformer.query_expansion = {"strategy": "pad_skip", "length": 16}
+        transformer.query_expansion = {"strategy": "fixed", "length": 16}
 
 
 def test_prompt_length_ignores_query_expansion() -> None:
@@ -1137,7 +1143,7 @@ def test_prompt_length_ignores_query_expansion() -> None:
     model = MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
     transformer = model[0]
     prompt = "search query: "
-    transformer.query_expansion = {"strategy": "pad_skip", "length": 32}
+    transformer.query_expansion = {"strategy": "fixed", "length": 32}
     with_expansion = transformer._get_prompt_length(prompt, task="query")
     transformer.query_expansion = None
     without_expansion = transformer._get_prompt_length(prompt, task="query")
@@ -1145,12 +1151,12 @@ def test_prompt_length_ignores_query_expansion() -> None:
     assert with_expansion < 32
 
 
-def test_pad_expansion_with_message_backbone_raises() -> None:
-    """pad_* on a chat-template (message) backbone would render queries through the template and
+def test_query_expansion_with_message_backbone_raises() -> None:
+    """Expansion on a chat-template (message) backbone would render queries through the template and
     truncate to the expansion length, collapsing different queries to the same preamble."""
     model = MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
     transformer = model[0]
-    transformer.query_expansion = {"strategy": "pad_skip", "length": 16}
+    transformer.query_expansion = {"strategy": "fixed", "length": 16}
     transformer.modality_config = {**transformer.modality_config, "message": {"method": "forward"}}
     with pytest.raises(ValueError, match="chat-template"):
         transformer.preprocess(["hello"], task="query")
