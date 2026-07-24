@@ -45,7 +45,7 @@ Use :meth:`~sentence_transformers.multi_vector_encoder.model.MultiVectorEncoder.
 :meth:`~sentence_transformers.multi_vector_encoder.model.MultiVectorEncoder.encode_document` for retrieval. These set the
 right prefix token (``[Q]`` / ``[D]``), max length, and apply any document-side skiplist configured on the model (empty by
 default, though legacy ColBERT / PyLate checkpoints pre-seed it with punctuation tokens). When query expansion is enabled,
-queries additionally pad to the fixed ``query_expansion["length"]``.
+queries additionally expand to the configured length.
 
 Multi-vector models can be loaded from any of the following sources, transparently::
 

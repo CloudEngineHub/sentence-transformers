@@ -726,6 +726,88 @@ class TestForward:
         assert features["input_ids"].shape[1] == 16
         assert warnings and "fixed width" in warnings[0]
 
+    def test_min_expansion_pads_short_queries_to_floor(self, bert_tiny_transformer, monkeypatch):
+        transformer = bert_tiny_transformer
+        monkeypatch.setattr(transformer, "query_expansion", {"strategy": "min", "token": None, "length": 8})
+        features = transformer.preprocess(["short"], task="query")
+        assert features["input_ids"].shape[1] == 8
+        positions = features["query_expansion_positions"]
+        # bert-tiny tokenizes "short" to [CLS] short [SEP]: 3 real tokens, 5 expansion positions.
+        assert positions.sum().item() == 5
+        assert (features["input_ids"][positions] == transformer.tokenizer.mask_token_id).all()
+        assert features["attention_mask"][positions].eq(0).all()
+
+    def test_min_expansion_leaves_long_queries_untruncated(self, bert_tiny_transformer, monkeypatch):
+        import sentence_transformers.base.modules.transformer as transformer_module
+
+        transformer = bert_tiny_transformer
+        monkeypatch.setattr(transformer, "query_expansion", {"strategy": "min", "token": None, "length": 8})
+        warnings: list[str] = []
+        monkeypatch.setattr(transformer_module.logger, "warning_once", warnings.append)
+        features = transformer.preprocess(
+            ["a very verbose query with clearly more than eight tokens worth of content in it"], task="query"
+        )
+        assert features["input_ids"].shape[1] > 8
+        assert not features["query_expansion_positions"].any()
+        assert not warnings
+
+    def test_min_expansion_mixed_batch_positions_per_row(self, bert_tiny_transformer, monkeypatch):
+        transformer = bert_tiny_transformer
+        monkeypatch.setattr(transformer, "query_expansion", {"strategy": "min", "token": None, "length": 8})
+        features = transformer.preprocess(
+            ["short", "a very verbose query with clearly more than eight tokens worth of content in it"],
+            task="query",
+        )
+        positions = features["query_expansion_positions"]
+        assert features["input_ids"].shape[1] > 8
+        assert positions[0].sum().item() == 5
+        assert positions[0, 8:].eq(False).all()
+        assert not positions[1].any()
+        # The short row's trailing pads beyond the floor stay real pads, excluded from scoring.
+        assert features["attention_mask"][0, 8:].eq(0).all()
+
+    def test_min_expansion_ceiling_via_max_length(self, bert_tiny_transformer, monkeypatch):
+        transformer = bert_tiny_transformer
+        monkeypatch.setattr(transformer, "query_expansion", {"strategy": "min", "token": None, "length": 8})
+        features = transformer.preprocess(
+            ["a very verbose query with clearly more than twelve tokens worth of content in it"],
+            task="query",
+            max_length=12,
+        )
+        assert features["input_ids"].shape[1] == 12
+
+    def test_min_expansion_attend_scopes_to_expansion_positions(self, bert_tiny_transformer, monkeypatch):
+        transformer = bert_tiny_transformer
+        monkeypatch.setattr(
+            transformer, "query_expansion", {"strategy": "min", "attend": True, "token": None, "length": 8}
+        )
+        features = transformer.preprocess(
+            ["short", "a very verbose query with clearly more than eight tokens worth of content in it"],
+            task="query",
+        )
+        assert features["attention_mask"][0, :8].eq(1).all()
+        assert features["attention_mask"][0, 8:].eq(0).all()
+
+    def test_fixed_expansion_warns_on_truncated_queries(self, bert_tiny_transformer, monkeypatch):
+        """strategy='fixed' silently loses content past the expansion length (the width is fixed in
+        both directions), so the first such batch must warn. strategy='min' never truncates."""
+        import sentence_transformers.base.modules.transformer as transformer_module
+
+        transformer = bert_tiny_transformer
+        monkeypatch.setattr(transformer, "query_expansion", {"strategy": "fixed", "token": None, "length": 8})
+        warnings: list[str] = []
+        monkeypatch.setattr(transformer_module.logger, "warning_once", warnings.append)
+
+        features = transformer.preprocess(["short query"], task="query")
+        assert features["input_ids"].shape[1] == 8
+        assert not warnings
+
+        features = transformer.preprocess(
+            ["a very verbose query with clearly more than eight tokens worth of content in it"], task="query"
+        )
+        assert features["input_ids"].shape[1] == 8
+        assert warnings and "truncated" in warnings[0]
+
     def test_retrieval_task_warns_on_text_documents(self, bert_tiny_transformer, monkeypatch):
         """`*ForRetrieval` processors always render text as a query: asking for document treatment
         on text inputs must warn instead of silently query-formatting the documents."""
@@ -1829,10 +1911,16 @@ class TestCanFlattenInputs:
         except ImportError:
             pytest.skip("kernels library not available")
 
-        transformer = Transformer(
-            TINY_BERT,
-            model_kwargs={"attn_implementation": "flash_attention_2", "torch_dtype": torch.bfloat16},
-        )
+        try:
+            transformer = Transformer(
+                TINY_BERT,
+                model_kwargs={"attn_implementation": "flash_attention_2", "torch_dtype": torch.bfloat16},
+            )
+        except (ValueError, FileNotFoundError, ImportError) as exc:
+            # The kernels hub ships no build variant for every platform (e.g. Windows).
+            if "flash" in str(exc).lower() or "build variant" in str(exc).lower():
+                pytest.skip(f"no flash-attn2 kernel build for this platform: {exc}")
+            raise
         assert transformer._can_flatten_inputs() is True
         assert transformer.can_flatten_inputs is True
         assert transformer.data_collator is not None

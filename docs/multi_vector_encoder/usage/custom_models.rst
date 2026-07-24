@@ -9,12 +9,28 @@ families (see `Sentence Transformers > Creating Custom Models <../../sentence_tr
 for the general module API, the saving format, and distributing custom modules via the Hub). The
 default multi-vector pipeline is:
 
-* :class:`~sentence_transformers.base.modules.Transformer`: processes the input and produces contextualized token embeddings. The multi-vector knobs (``query_length``, ``document_length``, ``query_expansion``) live here.
-* :class:`~sentence_transformers.base.modules.Dense` (token-level): projects each token embedding down to the multi-vector dimension (classically 128), via ``module_input_name="token_embeddings"``.
-* :class:`~sentence_transformers.multi_vector_encoder.modules.MultiVectorMask`: overwrites ``attention_mask`` with the per-row scoring mask (force-including query expansion positions, excluding document skiplist tokens).
-* :class:`~sentence_transformers.sentence_transformer.modules.Normalize` (token-level): L2-normalizes each token embedding, so each MaxSim term is a cosine similarity.
+* :class:`~sentence_transformers.base.modules.Transformer`: processes the input and produces contextualized
+  token embeddings. The multi-vector knobs (``query_length``, ``document_length``, ``query_expansion``) live
+  here. Only ``query_expansion`` is on by default, at ``{"strategy": "min", "length": 32}``: the classic
+  ColBERT trick of padding queries out to 32 ``[MASK]`` tokens, with ``"min"`` letting longer queries through
+  untruncated. Both length caps start unset, so inputs are capped only by the tokenizer's own maximum.
+* :class:`~sentence_transformers.base.modules.Dense` (token-level): projects each token embedding down to the
+  multi-vector dimension, via ``module_input_name="token_embeddings"``. Defaults to 128 output dimensions
+  with no bias and no activation, the classic ColBERT projection. Randomly initialized unless the checkpoint
+  ships one, so a fresh model needs training before it is useful.
+* :class:`~sentence_transformers.multi_vector_encoder.modules.MultiVectorMask`: overwrites ``attention_mask``
+  with the per-row scoring mask (force-including query expansion positions, excluding document skiplist
+  tokens). The skiplist starts empty, so every real token is scored. Legacy PyLate and Stanford-NLP
+  checkpoints pre-seed it with punctuation instead.
+* :class:`~sentence_transformers.sentence_transformer.modules.Normalize` (token-level): L2-normalizes each
+  token embedding, so each MaxSim term is a cosine similarity. No configuration.
 
-For example, a ColBERT-style model can be built from scratch by initializing these modules explicitly::
+Beyond the modules, a fresh model scores with MaxSim and carries empty ``prompts``. The classic ColBERT
+recipe also prepends "[Q] " and "[D] " marker tokens, caps document length, and skips punctuation tokens
+during document scoring, which released checkpoints configure themselves but a bare backbone does not.
+To reproduce the full classic recipe, initialize the modules explicitly::
+
+    import string
 
     from torch import nn
 
@@ -35,7 +51,7 @@ For example, a ColBERT-style model can be built from scratch by initializing the
         activation_function=nn.Identity(),
         module_input_name="token_embeddings",
     )
-    mask = MultiVectorMask()
+    mask = MultiVectorMask(skiplist_words=list(string.punctuation))  # skip punctuation for queries
     normalize = Normalize(module_input_name="token_embeddings")
 
     model = MultiVectorEncoder(

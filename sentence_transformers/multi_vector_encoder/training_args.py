@@ -25,8 +25,10 @@ class MultiVectorEncoderTrainingArguments(BaseTrainingArguments):
                ``router_mapping`` overrides per column.
 
             Tight training caps can be much faster and measurably stronger than uncapped training, see the
-            multi-vector MS MARCO knowledge distillation example. Queries governed by a ``query_expansion``
-            config ignore this override, as the expansion length already fixes their width.
+            multi-vector MS MARCO knowledge distillation example. Queries under a fixed-width
+            ``query_expansion`` (``strategy="fixed"``) ignore this override, as the expansion length already
+            fixes their width. Under ``strategy="min"`` it applies as the ceiling, never below the expansion
+            length.
     """
 
     _VALID_DICT_FIELDS = [*BaseTrainingArguments._VALID_DICT_FIELDS, "max_length"]

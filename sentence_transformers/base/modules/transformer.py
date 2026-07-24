@@ -523,6 +523,11 @@ class QueryExpansionConfig(TypedDict):
         (defaults to the tokenizer's ``mask_token``), longer queries are truncated down to it.
         ``length`` is both the floor and the ceiling: for query batches it overrides
         ``Transformer.query_length``.
+      - ``"min"``: ``length`` is only the floor. Shorter queries are expanded exactly like
+        ``"fixed"``, longer queries pass through untruncated instead of silently losing content.
+        ``Transformer.query_length`` (or a trainer ``max_length`` override) still applies as the
+        ceiling. On corpora where queries stay under ``length``, ``"min"`` and ``"fixed"`` produce
+        identical batches.
 
     * ``attend``: whether the encoder attends to the expansion positions. ``False`` (default,
       classic ColBERT) leaves them at ``attention_mask=0``: the encoder skips them in the forward
@@ -532,8 +537,8 @@ class QueryExpansionConfig(TypedDict):
 
     * ``token``: defaults to the tokenizer's ``mask_token``.
 
-    * ``length``: pad target (total tokens after expansion). **Required** (classic ColBERT uses
-      32).
+    * ``length``: pad target (total tokens after expansion, the width floor). **Required**
+      (classic ColBERT uses 32).
 
     Query expansion exists for classic mask-token checkpoints (PyLate / Stanford-NLP ColBERT):
     their attention-mask surgery and fixed-length pad target cannot be expressed in a chat
@@ -543,14 +548,14 @@ class QueryExpansionConfig(TypedDict):
     ``task == "query"`` renders.
     """
 
-    strategy: Literal["fixed"]
+    strategy: Literal["fixed", "min"]
     attend: NotRequired[bool]
     token: NotRequired[str | None]
     length: NotRequired[int]
 
 
 _VALID_QUERY_EXPANSION_KEYS: set[str] = {"strategy", "attend", "token", "length"}
-_VALID_QUERY_EXPANSION_STRATEGIES: tuple[str, ...] = ("fixed",)
+_VALID_QUERY_EXPANSION_STRATEGIES: tuple[str, ...] = ("fixed", "min")
 
 
 def _normalize_query_expansion(
@@ -999,9 +1004,9 @@ class Transformer(InputModule):
         if expansion is not None and query_length is not None and query_length < expansion["length"]:
             raise ValueError(
                 f"query_length={query_length} is smaller than query_expansion['length']={expansion['length']}. "
-                "With strategy='fixed', queries are tokenized directly to the expansion length, so a smaller "
-                "query_length content cap is not applied. Drop query_length, raise it to at least the "
-                "expansion length, or lower the expansion length."
+                "The expansion length is the query width floor, so a smaller query_length cap is "
+                "contradictory. Drop query_length, raise it to at least the expansion length, or lower "
+                "the expansion length."
             )
         self._query_expansion = expansion
 
@@ -1263,7 +1268,12 @@ class Transformer(InputModule):
         # Expansion queries manage their own max_length below (they pad to the config length).
         # Skip the generic path for them.
         expansion = self.query_expansion if task == "query" else None
-        if expansion is not None and max_length_override is not None and max_length_override != expansion["length"]:
+        if (
+            expansion is not None
+            and expansion["strategy"] == "fixed"
+            and max_length_override is not None
+            and max_length_override != expansion["length"]
+        ):
             logger.warning_once(
                 f"query_expansion fixes queries to {expansion['length']} tokens, so the "
                 f"max_length={max_length_override} override is ignored for query batches."
@@ -1279,17 +1289,27 @@ class Transformer(InputModule):
                 modality_kwargs[modality_key].update(overrides)
 
         # strategy='fixed': pad to the expansion length so the post-tokenization swap below has
-        # pad positions to replace. Applied after the merge so processing_kwargs can't break the fixed width.
+        # pad positions to replace. Applied after the merge so processing_kwargs can't break the
+        # fixed width. strategy='min' only applies the ceiling here, the width floor is enforced
+        # post-tokenization.
         if expansion is not None:
             text_overrides = effective_processing_kwargs.get("text") or {}
-            if "padding" in text_overrides or "max_length" in text_overrides:
-                logger.warning_once(
-                    "processing_kwargs overrides the text padding or max_length, but query "
-                    "expansion requires a fixed width: re-applying padding='max_length' with the "
-                    "expansion length for query batches."
-                )
-            modality_kwargs["text"]["max_length"] = expansion["length"]
-            modality_kwargs["text"]["padding"] = "max_length"
+            if expansion["strategy"] == "fixed":
+                if "padding" in text_overrides or "max_length" in text_overrides:
+                    logger.warning_once(
+                        "processing_kwargs overrides the text padding or max_length, but query "
+                        "expansion requires a fixed width: re-applying padding='max_length' with the "
+                        "expansion length for query batches."
+                    )
+                modality_kwargs["text"]["max_length"] = expansion["length"]
+                modality_kwargs["text"]["padding"] = "max_length"
+            elif task_max_length is not None and "max_length" not in text_overrides:
+                if task_max_length < expansion["length"]:
+                    logger.warning_once(
+                        f"query_expansion guarantees at least {expansion['length']} query tokens, so the "
+                        f"max_length={task_max_length} override is raised to it for query batches."
+                    )
+                modality_kwargs["text"]["max_length"] = max(task_max_length, expansion["length"])
 
         chat_template_kwargs = effective_processing_kwargs.get("chat_template", {})
         # Task-aware templates can branch on the task, e.g. to append query augmentation tokens.
@@ -1390,41 +1410,53 @@ class Transformer(InputModule):
             self._verify_left_padding(processor_output, modality_kwargs, common_kwargs)
             processor_output["logits_to_keep"] = 1
 
-        # ColBERT-style query expansion: swap pad positions for the expansion
-        # token id so the encoder produces expansion-token embeddings there. The
-        # ``query_expansion_positions`` mask below tells downstream modules to score those positions.
-        is_query = task == "query"
-        expansion = self.query_expansion if is_query else None
-        if expansion is not None and self.tokenizer is not None:
-            if expansion["token"] is not None:
-                expansion_id = self.tokenizer.convert_tokens_to_ids(expansion["token"])
-            else:
-                # PyLate's fallback chain: [MASK] for encoder models, EOS for decoder models.
-                expansion_id = self.tokenizer.mask_token_id
-                if expansion_id is None:
-                    expansion_id = self.tokenizer.eos_token_id
-            pad_id = self.tokenizer.pad_token_id
-            if (
-                expansion_id is not None
-                and pad_id is not None
-                and pad_id != expansion_id
-                and "input_ids" in processor_output
-            ):
-                input_ids = processor_output["input_ids"]
-                processor_output["input_ids"] = torch.where(
-                    input_ids == pad_id,
-                    torch.tensor(expansion_id, dtype=input_ids.dtype, device=input_ids.device),
-                    input_ids,
+        # ColBERT-style query expansion: swap pad positions within the width floor for the expansion
+        # token id, and mark them via ``query_expansion_positions`` so downstream modules score them.
+        expansion = self.query_expansion if task == "query" else None
+        if expansion is not None and "attention_mask" in processor_output and "input_ids" in processor_output:
+            floor = expansion["length"]
+            input_ids = processor_output["input_ids"]
+            attention_mask = processor_output["attention_mask"]
+            # 'min' tokenizes with batch-longest padding, which can sit below the floor: widen up to
+            # it. The 0-filler is overwritten by the expansion swap below.
+            if input_ids.shape[1] < floor:
+                missing = floor - input_ids.shape[1]
+                input_ids = torch.nn.functional.pad(input_ids, (0, missing), value=0)
+                attention_mask = torch.nn.functional.pad(attention_mask, (0, missing), value=0)
+                processor_output["input_ids"] = input_ids
+                processor_output["attention_mask"] = attention_mask
+                if "token_type_ids" in processor_output:
+                    processor_output["token_type_ids"] = torch.nn.functional.pad(
+                        processor_output["token_type_ids"], (0, missing), value=0
+                    )
+            # Per position rather than per batch: 'min' rows can carry real pads beyond the floor
+            # that must stay excluded from scoring. For 'fixed', width == floor: every pad counts.
+            expansion_positions = (attention_mask == 0) & (
+                torch.arange(input_ids.shape[1], device=attention_mask.device) < floor
+            )
+            # A 'fixed' row with no expansion positions was truncated to the width (silent content
+            # loss). Under 'min' such rows are simply long queries.
+            if expansion["strategy"] == "fixed" and not expansion_positions.any(dim=-1).all():
+                logger.warning_once(
+                    f"One or more queries filled the entire query_expansion length of {floor} tokens: any "
+                    "content beyond it was truncated, as this model always processes queries at exactly "
+                    "this width."
                 )
-        # Record where the expansion tokens sit (the tokenizer's pad positions) so the downstream
-        # scoring mask can force-include exactly those positions. Recorded per position rather than
-        # as a per-batch flag so expansion strategies without fixed-width rows stay expressible.
-        if expansion is not None and "attention_mask" in processor_output:
-            processor_output["query_expansion_positions"] = processor_output["attention_mask"] == 0
-        # ``attend=True`` forces attention_mask=1 at expansion positions so the encoder attends to
-        # them. ``attend=False`` leaves them at 0 (the classic ColBERT "skip during forward" trick).
-        if expansion is not None and expansion["attend"] and "attention_mask" in processor_output:
-            processor_output["attention_mask"] = torch.ones_like(processor_output["attention_mask"])
+            if self.tokenizer is not None:
+                if expansion["token"] is not None:
+                    expansion_id = self.tokenizer.convert_tokens_to_ids(expansion["token"])
+                else:
+                    # PyLate's fallback chain: [MASK] for encoder models, EOS for decoder models.
+                    expansion_id = self.tokenizer.mask_token_id
+                    if expansion_id is None:
+                        expansion_id = self.tokenizer.eos_token_id
+                if expansion_id is not None:
+                    processor_output["input_ids"] = input_ids.masked_fill(expansion_positions, expansion_id)
+            processor_output["query_expansion_positions"] = expansion_positions
+            # Scoped to the expansion positions, not ones_like: 'min' rows can carry real trailing
+            # pads. attend=False keeps the classic ColBERT "skip during forward" trick.
+            if expansion["attend"]:
+                processor_output["attention_mask"] = attention_mask.masked_fill(expansion_positions, 1)
 
         return processor_output
 

@@ -170,6 +170,47 @@ class TestIdColumnWarning:
         assert not any("look like ID columns" in msg for msg in caplog.messages)
 
 
+class TestMaxLength:
+    def make_recording_collator(self, **kwargs) -> tuple[BaseDataCollator, list[dict]]:
+        calls = []
+
+        def preprocess_fn(texts, prompt=None, task=None, **extra):
+            calls.append({"task": task, **extra})
+            return {"input_ids": torch.ones(len(texts), 3, dtype=torch.long)}
+
+        return BaseDataCollator(preprocess_fn=preprocess_fn, **kwargs), calls
+
+    def test_scalar_applies_to_every_column(self):
+        collator, calls = self.make_recording_collator(max_length=64)
+        collator([{"question": "q", "answer": "a"}])
+        assert [call.get("max_length") for call in calls] == [64, 64]
+
+    def test_dict_resolves_by_task(self):
+        collator, calls = self.make_recording_collator(
+            max_length={"query": 32, "document": 180},
+            router_mapping={"question": "query", "answer": "document"},
+        )
+        collator([{"question": "q", "answer": "a"}])
+        assert [call.get("max_length") for call in calls] == [32, 180]
+
+    def test_dict_without_task_leaves_uncapped(self):
+        collator, calls = self.make_recording_collator(max_length={"query": 32})
+        collator([{"question": "q", "answer": "a"}])
+        assert all("max_length" not in call for call in calls)
+
+    def test_dict_missing_task_entry_uncapped(self):
+        collator, calls = self.make_recording_collator(max_length={"query": 32}, router_mapping={"question": "query"})
+        collator([{"question": "q", "answer": "a"}])
+        assert calls[0]["max_length"] == 32
+        assert "max_length" not in calls[1]
+
+    def test_unset_never_reaches_legacy_preprocess_fns(self):
+        # make_collator's preprocess_fn has no **kwargs: with max_length unset the kwarg must not be passed.
+        collator = make_collator()
+        batch = collator([{"question": "q"}])
+        assert "question_input_ids" in batch
+
+
 class TestTaskResolution:
     def test_base_hook_returns_router_mapping_entry(self):
         collator = make_collator()

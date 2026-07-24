@@ -76,7 +76,7 @@ But if instead you want to train from a base transformer model, the classic ColB
     # Loading in fp32 is preferred for training if your memory can handle it
     model = MultiVectorEncoder("answerdotai/ModernBERT-base", model_kwargs={"torch_dtype": "float32"})
     # MultiVectorEncoder(
-    #   (0): Transformer({'transformer_task': 'feature-extraction', 'modality_config': {'text': {'method': 'forward', 'method_output_name': 'last_hidden_state'}}, 'module_output_name': 'token_embeddings', 'architecture': 'ModernBertModel'})
+    #   (0): Transformer({'transformer_task': 'feature-extraction', 'modality_config': {'text': {'method': 'forward', 'method_output_name': 'last_hidden_state'}}, 'module_output_name': 'token_embeddings', 'query_expansion': {'strategy': 'min', 'attend': False, 'token': None, 'length': 32}, 'architecture': 'ModernBertModel'})
     #   (1): Dense({'in_features': 768, 'out_features': 128, 'bias': False, 'activation_function': 'torch.nn.modules.linear.Identity', 'module_input_name': 'token_embeddings', 'module_output_name': 'token_embeddings'})
     #   (2): MultiVectorMask({'skiplist_words': [], 'keep_only_token_ids': None})
     #   (3): Normalize({'module_input_name': 'token_embeddings', 'module_output_name': 'token_embeddings'})
@@ -84,7 +84,7 @@ But if instead you want to train from a base transformer model, the classic ColB
 
 The fresh projection is randomly initialized, so training is required before this model is useful.
 
-Note that this default leaves the classic ColBERT tokenization tricks off: no ``[Q]`` / ``[D]`` prefix tokens, no query expansion, no per-task lengths, and no punctuation skiplist. To reproduce the full classic ColBERT recipe, configure them explicitly::
+Queries are expanded to at least 32 tokens with ``[MASK]``, the classic ColBERT trick, using the ``"min"`` strategy so that longer queries pass through untruncated. The remaining classic tokenization tricks are left off: no ``[Q]`` / ``[D]`` prefix tokens, no document length cap, and no punctuation skiplist. To reproduce the full classic ColBERT recipe, configure them explicitly::
 
     from torch import nn
 
@@ -666,6 +666,6 @@ Multi-Vector Encoder models have a few quirks that you should be aware of when t
 1. The contrastive losses default to ``scale=1.0`` (i.e. ``temperature=1.0``), matching PyLate, and unlike the dense :class:`~sentence_transformers.sentence_transformer.losses.MultipleNegativesRankingLoss` default of ``scale=20.0``. That 20.0 exists to amplify *bounded* cosine similarity (``[-1, 1]``), but MaxSim is an *unbounded* sum over query-token similarities (range ``~[0, num_query_tokens]``), so it needs no amplification, exactly as the dense loss recommends ``scale=1`` for dot-product similarity. A large ``scale`` here would saturate the softmax and kill gradients.
 2. The strongest late-interaction models are trained almost exclusively with n-way knowledge distillation from a stronger teacher model using :class:`~sentence_transformers.multi_vector_encoder.losses.MultiVectorDistillKLDivLoss`, instead of training directly from text pairs or triplets. See the Knowledge Distillation tab under `Trainer <#trainer>`_.
 3. In-batch negatives losses benefit heavily from larger batch sizes. If GPU memory is the bottleneck, :class:`~sentence_transformers.multi_vector_encoder.losses.CachedMultiVectorMultipleNegativesRankingLoss` reaches much larger effective batch sizes at a small speed cost via `GradCache <https://huggingface.co/papers/2101.06983>`_.
-4. A fresh model from a base transformer starts without the classic ColBERT tokenization tricks (``[Q]`` / ``[D]`` prefixes, query expansion, per-task lengths, punctuation skiplist). They are worth configuring explicitly (see `Model <#model>`_): in particular query expansion and the prefix tokens are part of the classic recipe that most released checkpoints use.
+4. A fresh model from a base transformer only gets query expansion out of the classic ColBERT tokenization tricks. The rest (``[Q]`` / ``[D]`` prefixes, a document length cap, a punctuation skiplist) are worth configuring explicitly: the prefix tokens in particular are part of the classic recipe that most released checkpoints use. See `Creating Custom Models <usage/custom_models.html>`_ for the full set of defaults and how to change each one.
 5. Multi-vector models are evaluated (and scored during training) with MaxSim, and the per-query-token score contributions are inspectable: see the `interpretability utilities <../package_reference/multi_vector_encoder/interpretability.html>`_ for similarity maps and heatmaps on image documents.
 ```

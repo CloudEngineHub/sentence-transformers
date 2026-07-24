@@ -27,9 +27,9 @@ def model() -> MultiVectorEncoder:
 
 def test_loads_with_default_modules(model: MultiVectorEncoder) -> None:
     # Four modules: Transformer + Dense projection (token-level) + MultiVectorMask + Normalize.
-    # A fresh MultiVectorEncoder from a bare HF model leaves the Transformer at the dense defaults
-    # (no query expansion, no per-task max-length). Users opt in explicitly via ``modules=...`` or by
-    # mutating ``model[0]`` after construction.
+    # An ST-saved dense checkpoint keeps the Transformer at the dense defaults (no query expansion,
+    # no per-task max-length). Truly bare HF checkpoints instead default to min expansion, see
+    # test_bare_checkpoint_defaults_to_min_expansion.
     assert len(model) == 4
     assert isinstance(model[0], Transformer)
     assert model[0].query_expansion is None
@@ -53,6 +53,13 @@ def test_default_colbert_attributes(model: MultiVectorEncoder) -> None:
     # and legacy PyLate / Stanford-NLP load paths pre-seed ``string.punctuation`` themselves.
     assert mask_module.skiplist_words == []
     assert mask_module._skiplist_ids is None
+
+
+def test_bare_checkpoint_defaults_to_min_expansion() -> None:
+    # A config-only HF checkpoint (no modules.json, no PyLate/Stanford markers) gets the fresh
+    # late-interaction default: min expansion at the classic ColBERT length.
+    model = MultiVectorEncoder("hf-internal-testing/tiny-random-bert")
+    assert model[0].query_expansion == {"strategy": "min", "attend": False, "token": None, "length": 32}
 
 
 def test_encode_query_pads_to_expansion_length() -> None:
