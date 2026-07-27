@@ -26,9 +26,8 @@ def model() -> MultiVectorEncoder:
 
 def test_loads_with_default_modules(model: MultiVectorEncoder) -> None:
     # Four modules: Transformer + Dense projection (token-level) + MultiVectorMask + Normalize.
-    # An ST-saved dense checkpoint keeps the Transformer at the dense defaults (no query expansion,
-    # no per-task max-length). Truly bare HF checkpoints instead default to min expansion, see
-    # test_bare_checkpoint_defaults_to_min_expansion.
+    # Fresh MVE constructions carry no query expansion: the classic ColBERT tricks are explicit
+    # recipe choices. Legacy PyLate / Stanford saves keep their own expansion configs.
     assert len(model) == 4
     assert isinstance(model[0], Transformer)
     assert model[0].query_expansion is None
@@ -54,11 +53,11 @@ def test_default_colbert_attributes(model: MultiVectorEncoder) -> None:
     assert mask_module._skiplist_ids is None
 
 
-def test_bare_checkpoint_defaults_to_min_expansion() -> None:
-    # A config-only HF checkpoint (no modules.json, no PyLate/Stanford markers) gets the fresh
-    # late-interaction default: min expansion at the classic ColBERT length.
+def test_bare_checkpoint_gets_no_expansion() -> None:
+    # A config-only HF checkpoint (no modules.json, no PyLate/Stanford markers) builds without
+    # query expansion: the classic ColBERT tricks are explicit recipe choices, not defaults.
     model = MultiVectorEncoder("hf-internal-testing/tiny-random-bert")
-    assert model[0].query_expansion == {"strategy": "min", "attend": False, "token": None, "length": 32}
+    assert model[0].query_expansion is None
 
 
 def test_encode_query_pads_to_expansion_length() -> None:
@@ -235,7 +234,7 @@ def test_query_expansion_setter_validates_post_init() -> None:
         model[0].query_expansion = {"strategy": "bogus"}
     with pytest.raises(ValueError, match="unknown keys"):
         model[0].query_expansion = {"strategy": "fixed", "garbage_key": True}
-    # The original state is preserved across the failed assignments.
+    # The original state (no expansion on fresh constructions) is preserved across the failed assignments.
     assert model[0].query_expansion is None
 
 
@@ -547,6 +546,8 @@ def test_convert_dense_sentence_transformer_resets_similarity_to_maxsim(tmp_path
     # Conversion produced a working MVE with the token-level MultiVectorMask + Normalize tail.
     assert isinstance(model[-2], MultiVectorMask)
     assert isinstance(model[-1], Normalize)
+    # Fresh conversions build without expansion, same as bare HF checkpoints.
+    assert model[0].query_expansion is None
 
 
 def test_convert_dense_st_with_dense_head_redirects_to_token_level(tmp_path) -> None:
@@ -752,6 +753,8 @@ def test_query_expansion_records_per_position_mask(attend: bool) -> None:
     real tokens."""
     model = MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
     transformer = model[0]
+    # Clear the fresh-construction default so n_real measures the query's natural width.
+    transformer.query_expansion = None
     n_real = transformer.preprocess(["short query"], task="query")["input_ids"].shape[1]
 
     transformer.query_expansion = {"strategy": "fixed", "attend": attend, "length": 16}

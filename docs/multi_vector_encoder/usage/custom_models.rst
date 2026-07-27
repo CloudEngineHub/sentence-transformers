@@ -11,9 +11,10 @@ default multi-vector pipeline is:
 
 * :class:`~sentence_transformers.base.modules.Transformer`: processes the input and produces contextualized
   token embeddings. The multi-vector knobs (``query_length``, ``document_length``, ``query_expansion``) live
-  here. Only ``query_expansion`` is on by default, at ``{"strategy": "min", "length": 32}``: the classic
-  ColBERT trick of padding queries out to 32 ``[MASK]`` tokens, with ``"min"`` letting longer queries through
-  untruncated. Both length caps start unset, so inputs are capped only by the tokenizer's own maximum.
+  here, and all start unset: inputs are capped only by the tokenizer's own maximum and queries are not
+  expanded. ColBERT-style query expansion (``query_expansion={"strategy": "min", "length": 32}``, padding
+  queries out to 32 ``[MASK]`` tokens, with ``"min"`` letting longer queries pass through where the classic
+  ``"fixed"`` strategy would truncate them) is an explicit recipe choice, as in the MS MARCO examples.
 * :class:`~sentence_transformers.base.modules.Dense` (token-level): projects each token embedding down to the
   multi-vector dimension, via ``module_input_name="token_embeddings"``. Defaults to 128 output dimensions
   with no bias and no activation, the classic ColBERT projection. Randomly initialized unless the checkpoint
@@ -26,8 +27,9 @@ default multi-vector pipeline is:
   token embedding, so each MaxSim term is a cosine similarity. No configuration.
 
 Beyond the modules, a fresh model scores with MaxSim and carries empty ``prompts``. The classic ColBERT
-recipe also prepends "[Q] " and "[D] " marker tokens, caps document length, and skips punctuation tokens
-during document scoring, which released checkpoints configure themselves but a bare backbone does not.
+recipe also expands queries to 32 tokens with ``[MASK]`` padding, prepends "[Q] " and "[D] " marker tokens,
+caps document length, and skips punctuation tokens during document scoring, which released checkpoints
+configure themselves but a bare backbone does not.
 To reproduce the full classic recipe, initialize the modules explicitly::
 
     import string

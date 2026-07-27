@@ -825,12 +825,6 @@ class MultiVectorEncoder(BaseModel):
                 self.model_card_data.set_base_model(model_name_or_path, revision=revision)
             return [transformer_model, MultiVectorMask(skiplist_words=self._legacy.skiplist_words)], {}
 
-        if not is_stanford_colbert:
-            # Fresh late-interaction models default to "min" query expansion at the classic ColBERT
-            # length: identical to fixed-width expansion on short queries, no silent truncation on
-            # long ones. Pass modules=... to opt out.
-            self._legacy.transformer_config.setdefault("query_expansion", {"strategy": "min", "length": 32})
-
         transformer_model = Transformer(
             model_name_or_path,
             cache_dir=cache_folder,
@@ -838,8 +832,8 @@ class MultiVectorEncoder(BaseModel):
             processor_kwargs=processor_kwargs,
             config_kwargs=config_kwargs,
             backend=self.backend,
-            # _legacy.transformer_config carries already-translated Transformer kwargs: Stanford
-            # artifact.metadata (document_length, query_expansion) or the fresh min-expansion default.
+            # _legacy.transformer_config carries already-translated Transformer kwargs, e.g.
+            # Stanford artifact.metadata (document_length, query_expansion).
             **self._legacy.transformer_config,
         )
         modules: list[nn.Module] = [transformer_model]
