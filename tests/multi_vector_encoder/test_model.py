@@ -1230,3 +1230,23 @@ def test_skiplist_words_set_at_init_and_resolved_on_demand() -> None:
     mask.resolve_with_tokenizer(model.tokenizer)
     tokens_after = model.encode_document([document])[0].shape[0]
     assert tokens_after == tokens_before - 2
+
+
+def test_packed_bit_precision_exports(model: MultiVectorEncoder) -> None:
+    """binary/ubinary produce packed per-token bits (8 dimensions per byte) for external engines
+    with native Hamming-style scoring. model.similarity cannot score packed inputs, see the
+    precision docstring."""
+    dim = model.get_embedding_dimension()
+    embeddings = model.encode_document(["Paris is the capital of France."], precision="ubinary")
+    assert embeddings[0].dtype == np.uint8
+    assert embeddings[0].shape[1] == dim // 8
+
+
+def test_int8_embeddings_are_scoreable(model: MultiVectorEncoder) -> None:
+    """encode(precision="int8") output must be scoreable by model.similarity (upcast inside MaxSim)."""
+    queries = model.encode_query(["What is the capital of France?"], precision="int8")
+    documents = model.encode_document(["Paris is the capital of France.", "Berlin lies in Germany."], precision="int8")
+    scores = model.similarity(queries, documents)
+    assert scores.shape == (1, 2)
+    assert scores.dtype == torch.float32
+    assert torch.isfinite(scores).all()

@@ -390,6 +390,31 @@ def test_maxsim_document_chunking_matches_unchunked() -> None:
         assert torch.allclose(unchunked, chunked, atol=1e-6), f"chunk_size={chunk_size}"
 
 
+def test_maxsim_list_documents_chunking_pads_per_chunk() -> None:
+    """Ragged document lists are padded per chunk, so one long outlier document no longer sizes the
+    padding of every chunk (the multi-GB-allocation failure mode on large corpora). Must stay
+    numerically identical to the unchunked globally-padded path."""
+    generator = torch.Generator().manual_seed(11)
+    a = torch.nn.functional.normalize(torch.randn(3, 6, 8, generator=generator), p=2, dim=-1)
+    lengths = [2, 40, 3, 5, 1, 7]
+    b = [torch.nn.functional.normalize(torch.randn(length, 8, generator=generator), p=2, dim=-1) for length in lengths]
+
+    unchunked = maxsim(a, b)
+    for chunk_size in (1, 2, 4):
+        chunked = maxsim(a, b, document_chunk_size=chunk_size)
+        assert torch.allclose(unchunked, chunked, atol=1e-6), f"chunk_size={chunk_size}"
+
+    # A caller-provided mask spans the global width and gets truncated to each chunk's local width.
+    b_mask = torch.zeros(len(lengths), max(lengths), dtype=torch.bool)
+    for row, length in enumerate(lengths):
+        b_mask[row, :length] = True
+    b_mask[1, 20:] = False
+    unchunked = maxsim(a, b, b_mask=b_mask)
+    for chunk_size in (1, 2, 4):
+        chunked = maxsim(a, b, b_mask=b_mask, document_chunk_size=chunk_size)
+        assert torch.allclose(unchunked, chunked, atol=1e-6), f"chunk_size={chunk_size}"
+
+
 def test_maxsim_integer_embeddings_upcast() -> None:
     """Quantized integer embeddings (encode(precision="int8")) are upcast to float so einsum and the
     finfo-based masking work, and the scores match float inputs with the same values."""
@@ -414,27 +439,3 @@ def test_maxsim_integer_embeddings_upcast() -> None:
     pairwise_padded = maxsim_pairwise(queries_padded, documents_padded)
     assert pairwise_padded.dtype == torch.float32
     assert torch.allclose(pairwise_padded, torch.diagonal(expected))
-
-
-def test_maxsim_ragged_document_chunking_matches_unchunked() -> None:
-    """Ragged lists pad per chunk (bounded by the chunk's longest document), and a caller mask
-    spanning the global width is trimmed to each chunk's local width."""
-    generator = torch.Generator().manual_seed(11)
-    queries = [torch.randn(4, 8, generator=generator), torch.randn(6, 8, generator=generator)]
-    documents = [torch.randn(n, 8, generator=generator) for n in (3, 17, 5, 9, 2, 12, 7)]
-
-    unchunked = maxsim(queries, documents)
-    for chunk_size in (1, 2, 3, 50):
-        chunked = maxsim(queries, documents, document_chunk_size=chunk_size)
-        assert torch.allclose(unchunked, chunked, atol=1e-6), f"chunk_size={chunk_size}"
-
-    # A caller-provided document mask at the global width, as produced for pre-padded corpora.
-    # Chunks whose longest document is shorter than the global width exercise the trim.
-    global_width = max(document.shape[0] for document in documents)
-    document_mask = torch.zeros(len(documents), global_width)
-    for i, document in enumerate(documents):
-        document_mask[i, : document.shape[0]] = 1.0
-    assert torch.allclose(unchunked, maxsim(queries, documents, b_mask=document_mask), atol=1e-6)
-    for chunk_size in (2, 3):
-        chunked = maxsim(queries, documents, b_mask=document_mask, document_chunk_size=chunk_size)
-        assert torch.allclose(unchunked, chunked, atol=1e-6), f"chunk_size={chunk_size}"

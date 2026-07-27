@@ -349,7 +349,10 @@ class MultiVectorEncoder(BaseModel):
                 with padding under that reconstruction and is skipped during scoring. Overrides
                 ``convert_to_numpy`` and ``convert_to_tensor`` (always returns a Tensor). Defaults to False.
             precision (str, optional): The output precision. One of ``"float32"``, ``"int8"``, ``"uint8"``,
-                ``"binary"``, ``"ubinary"``. Defaults to ``"float32"``.
+                ``"binary"``, ``"ubinary"``. Quantized ``"int8"`` / ``"uint8"`` embeddings stay scoreable
+                with ``model.similarity``. ``"binary"`` / ``"ubinary"`` are packed bits (8 dimensions per
+                byte) for Hamming-capable external engines: not meaningful inputs to ``model.similarity``.
+                Defaults to ``"float32"``.
             device (str, torch.device, list, or None): Device(s) for computation. Defaults to None.
             normalize_embeddings (bool, optional): If True, L2-normalize each per-token embedding before
                 returning. Use this when the loaded pipeline does not include a :class:`Normalize` module

@@ -310,6 +310,11 @@ def maxsim_pairwise(
         for i in range(len(a)):
             qi = _convert_to_tensor(a[i])
             di = _convert_to_tensor(b[i])
+            # Quantized (integer) embeddings are upcast so einsum and the finfo-based masking work.
+            if not qi.is_floating_point():
+                qi = qi.float()
+            if not di.is_floating_point():
+                di = di.float()
             score = torch.einsum("sh,th->st", qi, di)
             if b_mask is not None:
                 score = score.masked_fill(
@@ -323,6 +328,10 @@ def maxsim_pairwise(
 
     a = _convert_to_tensor(a)
     b = _convert_to_tensor(b)
+    if not a.is_floating_point():
+        a = a.float()
+    if not b.is_floating_point():
+        b = b.float()
     # Mirror maxsim: derive a mask from all-zero (pad) rows so pad cannot win the max.
     if a_mask is None and a.dim() == 3:
         a_mask = _zero_row_mask(a)
@@ -366,7 +375,9 @@ def _pad_multi_vector_inputs(
     mask comes from all-zero rows (see :func:`_zero_row_mask`).
     """
     if isinstance(inputs, list):
+        # Quantized (integer) embeddings are upcast so einsum and the finfo-based masking work.
         tensors = [_convert_to_tensor(t) for t in inputs]
+        tensors = [t if t.is_floating_point() else t.float() for t in tensors]
         lengths = torch.tensor([t.shape[0] for t in tensors])
         padded = torch.nn.utils.rnn.pad_sequence(tensors, batch_first=True, padding_value=0)
         if mask is None:
@@ -374,6 +385,8 @@ def _pad_multi_vector_inputs(
             mask = (torch.arange(max_len).unsqueeze(0) < lengths.unsqueeze(1)).to(padded.device, dtype=padded.dtype)
         return padded, mask
     padded = _convert_to_tensor(inputs)
+    if not padded.is_floating_point():
+        padded = padded.float()
     if mask is None and padded.dim() == 3:
         mask = _zero_row_mask(padded)
     return padded, mask
