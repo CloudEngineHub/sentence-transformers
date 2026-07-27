@@ -225,16 +225,18 @@ def maxsim(
             Tokens with a 0 / False entry are excluded from the max. Defaults to None (use all tokens).
         document_chunk_size (int, optional): If set, iterate the einsum + max-reduction over document
             chunks of this size along the ``b`` axis. Keeps the full ``(a, b, s, t)`` 4D intermediate
-            from being materialized at once. Useful for evaluation against large corpora. Defaults to
-            None (single einsum over the full ``b`` axis).
+            from being materialized at once, and pads ragged documents per chunk, bounding the padded
+            tensor by the chunk's own longest document. Useful for evaluation against large corpora.
+            Defaults to None (single einsum over the full ``b`` axis).
 
     Returns:
         Tensor: Matrix with ``res[i][j]`` = MaxSim(a[i], b[j]), shape ``(batch_a, batch_b)``.
     """
     a, a_mask_padded = _pad_multi_vector_inputs(a, a_mask)
-    b, b_mask_padded = _pad_multi_vector_inputs(b, b_mask)
 
-    if document_chunk_size is None or document_chunk_size >= b.size(0):
+    num_documents = len(b)
+    if document_chunk_size is None or document_chunk_size >= num_documents:
+        b, b_mask_padded = _pad_multi_vector_inputs(b, b_mask)
         reduced = _maxsim_reduce_documents(a, b, b_mask_padded)
         # Query tokens are reduced with sum, so masked tokens simply contribute 0.
         if a_mask_padded is not None:
@@ -242,10 +244,16 @@ def maxsim(
         return reduced.sum(dim=-1)
 
     score_chunks = []
-    for d_start in range(0, b.size(0), document_chunk_size):
+    for d_start in range(0, num_documents, document_chunk_size):
         d_end = d_start + document_chunk_size
-        chunk_b_mask = b_mask_padded[d_start:d_end] if b_mask_padded is not None else None
-        reduced = _maxsim_reduce_documents(a, b[d_start:d_end], chunk_b_mask)
+        # Padding upfront instead would let one long outlier document size the full
+        # (num_documents, max_len, dim) tensor: multi-GB of mostly padding on large ragged corpora.
+        chunk_mask = b_mask[d_start:d_end] if b_mask is not None else None
+        chunk_b, chunk_b_mask = _pad_multi_vector_inputs(b[d_start:d_end], chunk_mask)
+        if chunk_b_mask is not None and chunk_b_mask.shape[1] > chunk_b.shape[1]:
+            # A caller-provided mask spans the global width, the chunk only its local width.
+            chunk_b_mask = chunk_b_mask[:, : chunk_b.shape[1]]
+        reduced = _maxsim_reduce_documents(a, chunk_b, chunk_b_mask)
         # Mask and sum per chunk: concatenating the (batch_a, chunk, q_tokens) reductions first would
         # rebuild a full-corpus-width intermediate and defeat the chunking.
         if a_mask_padded is not None:

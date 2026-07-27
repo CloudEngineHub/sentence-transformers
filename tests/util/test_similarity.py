@@ -388,3 +388,53 @@ def test_maxsim_document_chunking_matches_unchunked() -> None:
     for chunk_size in (1, 4, 13, 50):
         chunked = maxsim(a, b, a_mask=a_mask, b_mask=b_mask, document_chunk_size=chunk_size)
         assert torch.allclose(unchunked, chunked, atol=1e-6), f"chunk_size={chunk_size}"
+
+
+def test_maxsim_integer_embeddings_upcast() -> None:
+    """Quantized integer embeddings (encode(precision="int8")) are upcast to float so einsum and the
+    finfo-based masking work, and the scores match float inputs with the same values."""
+    queries = [torch.tensor([[3, -2], [0, 1]], dtype=torch.int8), torch.tensor([[1, 1]], dtype=torch.int8)]
+    documents = [torch.tensor([[2, 0], [0, 5]], dtype=torch.int8), torch.tensor([[0, 1]], dtype=torch.int8)]
+    expected = maxsim([q.float() for q in queries], [d.float() for d in documents])
+
+    scores = maxsim(queries, documents)
+    assert scores.dtype == torch.float32
+    assert torch.allclose(scores, expected)
+
+    queries_padded = torch.nn.utils.rnn.pad_sequence(queries, batch_first=True)
+    documents_padded = torch.nn.utils.rnn.pad_sequence(documents, batch_first=True)
+    padded_scores = maxsim(queries_padded, documents_padded)
+    assert padded_scores.dtype == torch.float32
+    assert torch.allclose(padded_scores, expected)
+
+    pairwise = maxsim_pairwise(queries, documents)
+    assert pairwise.dtype == torch.float32
+    assert torch.allclose(pairwise, torch.diagonal(expected))
+
+    pairwise_padded = maxsim_pairwise(queries_padded, documents_padded)
+    assert pairwise_padded.dtype == torch.float32
+    assert torch.allclose(pairwise_padded, torch.diagonal(expected))
+
+
+def test_maxsim_ragged_document_chunking_matches_unchunked() -> None:
+    """Ragged lists pad per chunk (bounded by the chunk's longest document), and a caller mask
+    spanning the global width is trimmed to each chunk's local width."""
+    generator = torch.Generator().manual_seed(11)
+    queries = [torch.randn(4, 8, generator=generator), torch.randn(6, 8, generator=generator)]
+    documents = [torch.randn(n, 8, generator=generator) for n in (3, 17, 5, 9, 2, 12, 7)]
+
+    unchunked = maxsim(queries, documents)
+    for chunk_size in (1, 2, 3, 50):
+        chunked = maxsim(queries, documents, document_chunk_size=chunk_size)
+        assert torch.allclose(unchunked, chunked, atol=1e-6), f"chunk_size={chunk_size}"
+
+    # A caller-provided document mask at the global width, as produced for pre-padded corpora.
+    # Chunks whose longest document is shorter than the global width exercise the trim.
+    global_width = max(document.shape[0] for document in documents)
+    document_mask = torch.zeros(len(documents), global_width)
+    for i, document in enumerate(documents):
+        document_mask[i, : document.shape[0]] = 1.0
+    assert torch.allclose(unchunked, maxsim(queries, documents, b_mask=document_mask), atol=1e-6)
+    for chunk_size in (2, 3):
+        chunked = maxsim(queries, documents, b_mask=document_mask, document_chunk_size=chunk_size)
+        assert torch.allclose(unchunked, chunked, atol=1e-6), f"chunk_size={chunk_size}"
