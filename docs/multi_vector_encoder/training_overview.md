@@ -91,7 +91,7 @@ Queries are expanded to at least 32 tokens with ``[MASK]``, the classic ColBERT 
     from sentence_transformers import MultiVectorEncoder
     from sentence_transformers.base.modules import Dense, Transformer
     from sentence_transformers.multi_vector_encoder.modules import MultiVectorMask
-    from sentence_transformers.sentence_transformer.modules import Normalize
+    from sentence_transformers.base.modules import Normalize
     import string
 
     transformer = Transformer(

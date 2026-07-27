@@ -37,7 +37,7 @@ To reproduce the full classic recipe, initialize the modules explicitly::
     from sentence_transformers import MultiVectorEncoder
     from sentence_transformers.base.modules import Dense, Transformer
     from sentence_transformers.multi_vector_encoder.modules import MultiVectorMask
-    from sentence_transformers.sentence_transformer.modules import Normalize
+    from sentence_transformers.base.modules import Normalize
 
     transformer = Transformer(
         "answerdotai/ModernBERT-base",

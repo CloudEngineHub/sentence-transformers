@@ -67,7 +67,7 @@ class Router(InputModule):
             ::
 
                 from sentence_transformers import SentenceTransformer
-                from sentence_transformers.sentence_transformer.modules import Router, Normalize
+                from sentence_transformers.base.modules import Router, Normalize
 
                 # Use a regular SentenceTransformer for the document embeddings, and a static embedding model for the query embeddings
                 document_embedder = SentenceTransformer("mixedbread-ai/mxbai-embed-large-v1")

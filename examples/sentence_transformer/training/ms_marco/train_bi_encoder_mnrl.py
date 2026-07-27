@@ -32,12 +32,12 @@ from sentence_transformers import (
     SentenceTransformerTrainer,
     SentenceTransformerTrainingArguments,
 )
+from sentence_transformers.base.modules import Normalize
 from sentence_transformers.base.sampler import BatchSamplers
 from sentence_transformers.sentence_transformer.evaluation import NanoBEIREvaluator
 from sentence_transformers.sentence_transformer.losses import (
     CachedMultipleNegativesRankingLoss,
 )
-from sentence_transformers.sentence_transformer.modules import Normalize
 
 logging.basicConfig(format="%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S", level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)

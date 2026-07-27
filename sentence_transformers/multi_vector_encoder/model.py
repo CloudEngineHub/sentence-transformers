@@ -20,11 +20,10 @@ from transformers.utils import logging as transformers_logging
 
 from sentence_transformers.base import BaseModel
 from sentence_transformers.base.modality_types import SingleInput
-from sentence_transformers.base.modules import Transformer
+from sentence_transformers.base.modules import Normalize, Transformer
 from sentence_transformers.base.modules.dense import Dense
 from sentence_transformers.multi_vector_encoder.model_card import MultiVectorEncoderModelCardData
 from sentence_transformers.multi_vector_encoder.modules import BaseTokenPooling, MultiVectorMask
-from sentence_transformers.sentence_transformer.modules import Normalize
 from sentence_transformers.util import batch_to_device, load_file_path
 from sentence_transformers.util.misc import import_from_string
 from sentence_transformers.util.quantization import quantize_embeddings

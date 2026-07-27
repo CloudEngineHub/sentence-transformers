@@ -9,14 +9,13 @@ import torch
 from PIL import Image
 
 from sentence_transformers import MultiVectorEncoder
-from sentence_transformers.base.modules import Transformer
+from sentence_transformers.base.modules import Normalize, Transformer
 from sentence_transformers.base.modules.dense import Dense
 from sentence_transformers.multi_vector_encoder.modules import (
     HierarchicalTokenPooling,
     MultiVectorMask,
 )
 from sentence_transformers.multi_vector_encoder.scoring import XTRScores, colbert_scores
-from sentence_transformers.sentence_transformer.modules import Normalize
 from sentence_transformers.util import SimilarityFunction, maxsim, maxsim_pairwise
 
 

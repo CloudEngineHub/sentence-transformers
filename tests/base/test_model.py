@@ -1175,7 +1175,7 @@ class StrictLoadModule(Module):
 def test_modules_and_path_combo_warns_and_loads_from_path(caplog) -> None:
     """Passing both ``model_name_or_path`` and ``modules`` silently discarded the modules: now it
     warns, and the checkpoint's own modules win."""
-    from sentence_transformers.sentence_transformer.modules import Normalize
+    from sentence_transformers.base.modules import Normalize
 
     with caplog.at_level(logging.WARNING):
         model = SentenceTransformer("sentence-transformers-testing/stsb-bert-tiny-safetensors", modules=[Normalize()])
