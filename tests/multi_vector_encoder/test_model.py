@@ -198,6 +198,39 @@ def test_resolve_retrieval_model_class_from_peft_config() -> None:
     assert _resolve_retrieval_model_class(config).__name__ == "ColQwen2ForRetrieval"
 
 
+@pytest.mark.skip("Released peft reloads injected-adapter saves with reset weights, fixed on peft main")
+def test_peft_adapter_save_load_round_trip(tmp_path) -> None:
+    # transformers 5.x with released peft reloads injected-adapter saves with freshly initialized
+    # adapter weights, silently resetting LoRA to identity. Round trips twice to cover both save
+    # formats. Un-skip when a peft release carries the upstream fix.
+    peft = pytest.importorskip("peft")
+
+    model = MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
+    model.add_adapter(
+        peft.LoraConfig(
+            task_type=peft.TaskType.FEATURE_EXTRACTION,
+            target_modules=["query", "key", "value"],
+            r=2,
+            lora_alpha=4,
+        )
+    )
+    with torch.no_grad():
+        for name, param in model.named_parameters():
+            if "lora_B" in name:
+                param.data.normal_(std=0.5)
+    expected = np.asarray(model.encode_query("peft round trip"))
+
+    first = tmp_path / "first"
+    model.save_pretrained(str(first))
+    reloaded = MultiVectorEncoder(str(first))
+    assert np.allclose(expected, np.asarray(reloaded.encode_query("peft round trip")), atol=1e-6)
+
+    second = tmp_path / "second"
+    reloaded.save_pretrained(str(second))
+    reloaded_twice = MultiVectorEncoder(str(second))
+    assert np.allclose(expected, np.asarray(reloaded_twice.encode_query("peft round trip")), atol=1e-6)
+
+
 def test_gradient_checkpointing_skips_unsupporting_wrapper() -> None:
     # transformers wrappers that don't declare gradient checkpointing support (e.g.
     # ColQwen2ForRetrieval in transformers 5.13) must be skipped with a warning instead of the

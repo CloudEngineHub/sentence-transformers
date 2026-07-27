@@ -528,7 +528,7 @@ def test_load_with_model_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
     assert transformer_kwargs["model_kwargs"]["attn_implementation"] == "eager"
 
 
-@pytest.mark.skip("Currently failing on transformers v5.0.0.rc")
+@pytest.mark.skip("Released peft reloads injected-adapter saves with reset weights, fixed on peft main")
 @pytest.mark.skipif(not is_peft_available(), reason="PEFT must be available to test PEFT support.")
 def test_load_checkpoint_with_peft_and_lora(stsb_bert_tiny_model: SentenceTransformer) -> None:
     model = stsb_bert_tiny_model
