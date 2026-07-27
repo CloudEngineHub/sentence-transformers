@@ -534,6 +534,8 @@ The :class:`~sentence_transformers.MultiVectorEncoderTrainer` is where all previ
 
     The strongest late-interaction models are trained by distilling the rankings of a strong teacher (e.g. a `Cross Encoder <../cross_encoder/usage/usage.html>`_) over N candidate documents per query, rather than from raw pairs or triplets. `lightonai/ms-marco-en-bge <https://huggingface.co/datasets/lightonai/ms-marco-en-bge>`_ provides exactly that: per-query candidate document IDs with teacher scores, resolved to texts on the fly by :func:`~sentence_transformers.util.dataset.resolve_ids`.
 
+    See `training_kd.py <https://github.com/huggingface/sentence-transformers/blob/main/examples/multi_vector_encoder/training/msmarco/training_kd.py>`_ for a complete knowledge distillation run that additionally builds the model with a LateOn-style bottleneck projection head.
+
     ::
 
         import logging

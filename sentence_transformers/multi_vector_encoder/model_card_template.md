@@ -209,11 +209,6 @@ Carbon emissions were measured using [CodeCarbon](https://github.com/mlco2/codec
 - Datasets: {{ version["datasets"] }}
 - Tokenizers: {{ version["tokenizers"] }}
 
-## Additional Resources
-
-- [Sentence Transformers Documentation](https://www.sbert.net): the full documentation site, including training, evaluation, and pre-trained model catalogs.
-- [PyLate](https://github.com/lightonai/pylate): the upstream library whose features were absorbed into Sentence Transformers for multi-vector / late-interaction models.
-
 ## Citation
 
 ### BibTeX

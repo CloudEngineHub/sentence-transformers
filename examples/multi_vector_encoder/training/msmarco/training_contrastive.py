@@ -6,6 +6,14 @@ hard negatives.
 
 As loss function, we use MultiVectorMultipleNegativesRankingLoss, which uses the in-batch negatives with MaxSim scoring.
 This recipe is adapted from PyLate's `examples/train/contrastive.py`.
+
+Reference results (NanoBEIR msmarco/nq/fiqa2018 mean nDCG@10, with the final model's full 13-dataset
+mean in parentheses, single RTX 3090):
+- pre-training baseline, ModernBERT-base with a random projection: 0.1338
+- as-is, 50k triplets (about 25 minutes): 0.4254 best during training (full suite: 0.4831),
+  uploaded as https://huggingface.co/tomaarsen/multivector-ModernBERT-base-msmarco-contrastive
+- without the query expansion line: 0.4081 (full suite: 0.4581), uploaded as
+  https://huggingface.co/tomaarsen/multivector-ModernBERT-base-msmarco-contrastive-no-query-expansion
 """
 
 import logging
@@ -19,9 +27,11 @@ from sentence_transformers import (
     MultiVectorEncoderTrainer,
     MultiVectorEncoderTrainingArguments,
 )
+from sentence_transformers.base.modules import Dense, Normalize, Transformer
 from sentence_transformers.base.sampler import BatchSamplers
 from sentence_transformers.multi_vector_encoder.evaluation import MultiVectorNanoBEIREvaluator
 from sentence_transformers.multi_vector_encoder.losses import MultiVectorMultipleNegativesRankingLoss
+from sentence_transformers.multi_vector_encoder.modules import MultiVectorMask
 
 # Set the log level to INFO to get more information
 logging.basicConfig(format="%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S", level=logging.INFO)
@@ -36,16 +46,31 @@ def main():
     num_epochs = 1
     learning_rate = 3e-5
 
-    # 1a. Load a model to finetune with 1b. (Optional) model card data
-    # Loading in fp32 is preferred for training if your memory can handle it
-    model = MultiVectorEncoder(
+    # 1a. Build the model to finetune with 1b. (Optional) model card data. Queries are padded to at
+    # least 32 tokens with [MASK] expansion tokens acting as learned soft query terms (see the
+    # reference results above for the gain). Loading in fp32 is preferred for training if your
+    # memory can handle it, bf16=True below handles the autocast.
+    transformer = Transformer(
         model_name,
+        model_kwargs={"torch_dtype": "float32"},
+        query_expansion={"strategy": "min", "length": 32},
+    )
+    linear = Dense(
+        transformer.get_embedding_dimension(),
+        128,
+        bias=False,
+        activation_function=None,
+        module_input_name="token_embeddings",
+    )
+    mask = MultiVectorMask()
+    normalize = Normalize(module_input_name="token_embeddings")
+    model = MultiVectorEncoder(
+        modules=[transformer, linear, mask, normalize],
         model_card_data=MultiVectorEncoderModelCardData(
             language="en",
             license="apache-2.0",
             model_name=f"ColBERT {short_model_name} trained on MS MARCO triplets",
         ),
-        model_kwargs={"torch_dtype": "float32"},
     )
 
     # 2. Load the MS MARCO triplets dataset: https://huggingface.co/datasets/sentence-transformers/msmarco-bm25
@@ -65,7 +90,7 @@ def main():
     evaluator(model)
 
     # 5. Define the training arguments
-    run_name = f"multivector-{short_model_name}-msmarco"
+    run_name = f"multivector-{short_model_name}-msmarco-contrastive"
     args = MultiVectorEncoderTrainingArguments(
         # Required parameter:
         output_dir=f"models/{run_name}",
