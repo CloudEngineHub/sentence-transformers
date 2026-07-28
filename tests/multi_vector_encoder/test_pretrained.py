@@ -19,14 +19,19 @@ DOCUMENTS = [
 ]
 
 # Cross-library parity guard, one entry per load path. Expected scores come from PyLate (the
-# reference implementation) via `demo_multi_vector_pylate.py`. LFM2 is the only decoder-only entry,
-# so it alone covers the EOS query-expansion fallback.
+# reference implementation) via `demo_multi_vector_pylate.py`. LFM2 has no mask token, so it alone
+# covers the EOS query-expansion fallback. The Perplexity entry alone attends to its expansion
+# tokens, so it alone covers them reaching the backbone rather than only the scoring mask.
 MODELS_TO_MAXSIM: dict[str, list[float]] = {
     "lightonai/Reason-ModernColBERT": [9.05118, 10.18419, 9.12381, 9.39101],
     "answerdotai/answerai-colbert-small-v1": [30.56916, 31.48954, 31.30291, 31.30716],
     "colbert-ir/colbertv2.0": [12.79703, 27.19449, 23.8495, 24.56564],
     "lightonai/colbertv2.0": [12.79703, 27.19449, 23.8495, 24.56564],
     "LiquidAI/LFM2-ColBERT-350M": [30.3855, 30.63302, 30.43718, 30.55411],
+    "perplexity-ai/pplx-embed-v1-late-0.6b": [31.56128, 31.80504, 31.67393, 31.74072],
+    "lightonai/GTE-ModernColBERT-v1": [11.25772, 11.51133, 11.34575, 11.4518],
+    "lightonai/LateOn": [10.79417, 11.11042, 10.97427, 11.08107],
+    "mixedbread-ai/mxbai-edge-colbert-v0-17m": [11.56932, 11.75844, 11.70989, 11.72288],
 }
 
 # doc{i} is the relevant page for IMAGE_QUERIES[i], so the correct retrieval is the diagonal.
@@ -39,40 +44,17 @@ IMAGE_DOCUMENTS = [
     f"https://huggingface.co/tomaarsen/colpali-v1.3-merged-st/resolve/main/assets/doc{i}.jpg" for i in range(1, 5)
 ]
 
-# Image-document counterpart of MODELS_TO_MAXSIM. Each entry was generated against the checkpoint's
-# own reference implementation, in float32, and covers a different load path:
+# Image-document counterpart of MODELS_TO_MAXSIM: reference scores from each checkpoint's own
+# reference implementation in float32, one entry per load path (merged checkpoints, adapter repos,
+# the transformers-native ``*ForRetrieval`` pipelines, remote-code ColQwen3 via auto_map, the
+# Qwen-Omni any-to-any, and the ColIdefics3 / ColModernVBERT backbone families). Merged/adapter pairs
+# carry separate expected values: the adapter merge happens in float32 at load time and drifts up to ~1e-2.
 #
-#   colpali-v1.2-merged   ColPali, August 2024 query format ("Question: " + 5x <unused0> + newline)
-#   colpali-v1.2-hf       the August checkpoint via `*ForRetrieval`, buffer restored by processing_kwargs
-#   colpali-v1.3-merged   ColPali, November 2024 query format ("Query: " + 10x <pad> + newline)
-#   colpali-v1.3-st       the same checkpoint as an adapter repo, merged onto its base at load time
-#   colpali-v1.3-hf       the same checkpoint via the auto-recognised `*ForRetrieval` pipeline
-#   colqwen2-v1.0-merged  ColQwen2 via a stock Transformer plus model_kwargs key_mapping
-#   colqwen2-v1.0-st      ColQwen2 as an adapter repo
-#   colqwen2-v1.0-hf      ColQwen2 via the auto-recognised `*ForRetrieval` pipeline
-#   colsmolvlm-v0.1       ColIdefics3 with the retrieval format as a named chat template
-#   colSmol-256M/500M     ColIdefics3, a third backbone family, adapter-only
-#   tomoro-colqwen3       third-party remote-code ColQwen3, resolved via the auto_map fallback
-#                         (only the 4b: the 8b sibling is the same architecture and custom code,
-#                          but needs ~35 GiB in float32, so it cannot run on a 24 GiB card)
-#   colqwen-omni-v0.1     Qwen2.5-Omni Thinker via any-to-any, also handles audio documents
-#   colmodernvbert        ColModernVBERT, a bidirectional ModernBERT text tower, merged and adapter
-#
-# A merged/adapter pair can differ by up to about 1e-2 because the adapter merge happens in float32 at
-# load time rather than having been baked into the checkpoint, so each carries its own expected values.
-# How far they drift depends on the adapter (colmodernvbert lands bit-identical, colpali-v1.3 does not).
-#
-# The ColPali entries are the load-bearing ones, and they guard two independent things. First the token
-# render: colpali-engine dropped the trailing newline in 0.3.11 and the query prefix in 0.3.13, so these
-# checkpoints are no longer queried the way they were trained. The expected values were produced by taking
-# token ids from colpali-engine pinned at the era each checkpoint records in git_hash.txt (e8348666 on
-# transformers 4.44.2, 7fecd19a on 4.46.3) and confirming the chat template reproduces them independently.
-# Second the query attention mask, which splits by era. On transformers 4.44.x PaliGemma builds its
-# bidirectional mask inside the image-merge branch, so a text-only query skips it and runs causally, while
-# 4.46.x moved that mask out and queries became bidirectional. The v1.3 repos therefore request
-# token_type_ids via processor_kwargs.model_input_names and the older ones deliberately do not, each
-# reproducing its own era's query embeddings exactly. Documents are unaffected either way, since
-# PaliGemmaProcessor always returns token_type_ids on the image path.
+# Do not regenerate the ColPali values with a current colpali-engine: it changed the query render
+# twice (0.3.11 dropped the trailing newline, 0.3.13 the query prefix), so the expected token ids
+# come from colpali-engine pinned at each checkpoint's git_hash.txt era. All repos also send
+# token_type_ids, without which transformers 5.x PaliGemma materializes no attention mask and
+# batched short queries attend to their own padding.
 IMAGE_MODELS_TO_MAXSIM: dict[str, list[list[float]]] = {
     "tomaarsen/colpali-v1.2-merged-st": [
         [11.12544, 10.70494, 8.33699, 5.55528],
@@ -144,11 +126,12 @@ IMAGE_MODELS_TO_MAXSIM: dict[str, list[list[float]]] = {
     ],
 }
 
-# The adapter repos ship a small ``modeling_st_*.py`` that reads ``base_model_name_or_path``, remaps the
-# LoRA keys and merges them onto the base at load time, so they need remote code. The merged checkpoints
-# and the transformers-native ``*ForRetrieval`` repos do not, and are deliberately not granted it.
-IMAGE_MODELS_NEEDING_REMOTE_CODE: frozenset[str] = frozenset(
+# Checkpoints that need remote code: the Perplexity backbone ships as repository code, and the
+# ``-st`` adapter repos ship a small ``modeling_st_*.py`` that merges the LoRA onto its base at
+# load time. The rest are deliberately not granted it.
+MODELS_NEEDING_REMOTE_CODE: frozenset[str] = frozenset(
     {
+        "perplexity-ai/pplx-embed-v1-late-0.6b",
         "tomaarsen/colpali-v1.3-st",
         "tomaarsen/colqwen2-v1.0-st",
         "tomaarsen/colsmolvlm-v0.1-st",
@@ -168,7 +151,7 @@ _MIN_IMAGE_MAXSIM_VRAM_BYTES = 16 * 1024**3
 @pytest.mark.parametrize("model_name, expected_score", MODELS_TO_MAXSIM.items())
 @pytest.mark.slow
 def test_pretrained_multi_vector_maxsim(model_name: str, expected_score: list[float]) -> None:
-    model = MultiVectorEncoder(model_name)
+    model = MultiVectorEncoder(model_name, trust_remote_code=model_name in MODELS_NEEDING_REMOTE_CODE)
     query_embeddings = model.encode_query([QUERY])
     document_embeddings = model.encode_document(DOCUMENTS)
     similarities = model.similarity(query_embeddings, document_embeddings)[0]
@@ -188,7 +171,7 @@ def test_pretrained_prompt_prefix_stays_one_token(model_name: str) -> None:
     trailing space for an in-vocab marker (``[unused0] `` -> ``[unused0]``) but keeps it for a
     PyLate-style added token (``[Q] ``), hence the two accepted forms.
     """
-    model = MultiVectorEncoder(model_name)
+    model = MultiVectorEncoder(model_name, trust_remote_code=model_name in MODELS_NEEDING_REMOTE_CODE)
     tokenizer = model.tokenizer
     prompts = {task: prompt for task, prompt in model.prompts.items() if prompt and prompt.strip()}
     assert prompts, f"{model_name} is expected to carry query / document prompts"
@@ -218,7 +201,7 @@ def test_pretrained_image_document_maxsim(model_name: str, expected_scores: list
     """
     model = MultiVectorEncoder(
         model_name,
-        trust_remote_code=model_name in IMAGE_MODELS_NEEDING_REMOTE_CODE,
+        trust_remote_code=model_name in MODELS_NEEDING_REMOTE_CODE,
         model_kwargs={"dtype": torch.float32},
     )
     query_embeddings = model.encode_query(IMAGE_QUERIES, convert_to_tensor=True)
