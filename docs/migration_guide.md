@@ -13,6 +13,13 @@ The v6.0 release introduces :class:`~sentence_transformers.MultiVectorEncoder`, 
 evaluation. Existing PyLate checkpoints load directly, e.g.
 ``MultiVectorEncoder("lightonai/GTE-ModernColBERT-v1")``, with the prefix tokens, query expansion, and
 punctuation skiplist recovered from the saved config.
+
+One difference on **bare** (non-ColBERT) checkpoints: PyLate's ``ColBERT("bert-base-uncased")``
+applies the classic recipe by default (``[Q] `` / ``[D] `` prefixes, mask-token query expansion, a
+punctuation skiplist), while ``MultiVectorEncoder("bert-base-uncased")`` builds a plain stack and
+leaves those as explicit recipe choices. To reproduce PyLate's fresh-model behaviour, pass them
+explicitly (see the msmarco training examples and `Creating Custom Models
+<multi_vector_encoder/usage/custom_models.html>`_).
 ```
 
 | PyLate | Sentence Transformers |

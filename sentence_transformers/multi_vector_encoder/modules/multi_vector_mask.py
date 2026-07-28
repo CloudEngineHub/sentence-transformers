@@ -36,10 +36,12 @@ class MultiVectorMask(Module):
     Args:
         skiplist_words: Tokens to drop from document scoring. Defaults to ``[]`` (no skiplist). Pass
             ``list(string.punctuation)`` to match the original PyLate / Stanford-NLP ColBERT behaviour
-            of skipping punctuation, or any other custom list. Legacy PyLate / Stanford-NLP loaders
-            apply ``string.punctuation`` automatically so existing saved checkpoints keep their
-            historical behaviour. Set at construction: changing it on a built model additionally
-            requires calling :meth:`resolve_with_tokenizer` with the model's tokenizer.
+            of skipping punctuation, or any other custom list. It applies document-side only, so the
+            listed tokens stop matching at all: a domain choice that suits English prose but not
+            symbol-heavy retrieval such as code. Legacy PyLate / Stanford-NLP loaders apply
+            ``string.punctuation`` automatically so existing saved checkpoints keep their historical
+            behaviour. Set at construction: changing it on a built model additionally requires
+            calling :meth:`resolve_with_tokenizer` with the model's tokenizer.
         keep_only_token_ids: Allowlist of token IDs to keep in document scoring. Defaults to ``None``
             (no allowlist: every non-skiplisted real token is scored). Set this to the model's
             image-patch token id (e.g. ``processor.image_token_id`` for ColPali / ColQwen2) to
