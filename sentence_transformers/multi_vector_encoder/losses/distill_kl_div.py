@@ -7,6 +7,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
+from sentence_transformers.base.losses.merged_forward import embed_columns_padded
 from sentence_transformers.multi_vector_encoder.model import MultiVectorEncoder
 from sentence_transformers.multi_vector_encoder.scoring import colbert_kd_scores
 from sentence_transformers.util import stack_padded_token_embeddings
@@ -40,7 +41,16 @@ class MultiVectorDistillKLDivLoss(nn.Module):
         temperature: Temperature applied to student / teacher logits before softmax. Defaults to ``1.0``.
             The loss is multiplied by ``temperature ** 2`` to keep the gradient magnitude comparable across
             temperatures (Hinton et al., 2015).
+        mini_batch_size: Maximum number of rows per model forward. The merged
+            ``batch_size * n_ways`` document batch is split into row chunks, each re-trimmed to its
+            own longest document, so a single long outlier document only widens its own chunk.
+            Chunking is exact for this loss (no cross-row interactions). ``None`` (default) runs one
+            merged forward.
     """
+
+    # Enables per-sample media counting in Transformer.preprocess, so mini-batching can slice VLM
+    # inputs (e.g. Qwen2-VL's flattened pixel_values) along the batch dimension.
+    requires_media_counts = True
 
     def __init__(
         self,
@@ -49,6 +59,7 @@ class MultiVectorDistillKLDivLoss(nn.Module):
         size_average: bool = True,
         normalize_scores: bool = True,
         temperature: float = 1.0,
+        mini_batch_size: int | None = None,
     ) -> None:
         super().__init__()
         self.model = model
@@ -56,6 +67,7 @@ class MultiVectorDistillKLDivLoss(nn.Module):
         self.normalize_scores = normalize_scores
         self.temperature = temperature
         self.size_average = size_average
+        self.mini_batch_size = mini_batch_size
         self.loss_function = nn.KLDivLoss(reduction="batchmean" if size_average else "sum", log_target=True)
 
     def get_config_dict(self) -> dict[str, Any]:
@@ -70,6 +82,7 @@ class MultiVectorDistillKLDivLoss(nn.Module):
             "normalize_scores": self.normalize_scores,
             "temperature": self.temperature,
             "size_average": self.size_average,
+            "mini_batch_size": self.mini_batch_size,
         }
 
     def forward(
@@ -86,25 +99,23 @@ class MultiVectorDistillKLDivLoss(nn.Module):
 
         # Collator-stamped tasks (positional fallback), masks from the model output where
         # MultiVectorMask has rewritten attention_mask into the per-row scoring mask.
-        outputs = [
-            self.model(sf, task=sf.get("task", "query" if idx == 0 else "document"))
-            for idx, sf in enumerate(sentence_features)
-        ]
-        queries_embeddings = outputs[0]["token_embeddings"]
-        queries_mask = outputs[0]["attention_mask"].bool()
+        query_features = sentence_features[0]
+        query_outputs = self.model(query_features, task=query_features.get("task", "query"))
+        queries_embeddings = query_outputs["token_embeddings"]
+        queries_mask = query_outputs["attention_mask"].bool()
 
         bs = queries_embeddings.size(0)
-        n_ways = len(outputs) - 1
+        n_ways = len(sentence_features) - 1
         if labels.shape != (bs, n_ways):
             raise ValueError(
                 f"{type(self).__name__} expects teacher scores of shape (batch_size, n_ways) = "
                 f"({bs}, {n_ways}), but got {tuple(labels.shape)}."
             )
+
         # Stack the per-column document embeddings into (batch_size, n_ways, d_tokens, dim), padding
         # the token axis to the cross-column max (columns are padded independently).
         documents_embeddings, documents_mask = stack_padded_token_embeddings(
-            [output["token_embeddings"] for output in outputs[1:]],
-            [output["attention_mask"].bool() for output in outputs[1:]],
+            *embed_columns_padded(self.model, sentence_features[1:], self.mini_batch_size, task_default="document")
         )
 
         scores = self.score_metric(

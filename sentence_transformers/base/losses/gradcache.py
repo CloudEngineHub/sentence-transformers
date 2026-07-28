@@ -138,7 +138,12 @@ def _create_minibatch(sentence_feature: dict[str, Any], begin: int, end: int) ->
         attention_mask = sentence_feature.get("attention_mask")
         if isinstance(attention_mask, torch.Tensor) and attention_mask.ndim == 2:
             seq_width = attention_mask.shape[1]
-            active_columns = attention_mask[begin:end].any(dim=0)
+            active = attention_mask[begin:end].bool()
+            # ColBERT expansion positions carry attention_mask 0 but are scored, so they must survive.
+            expansion_positions = sentence_feature.get("query_expansion_positions")
+            if isinstance(expansion_positions, torch.Tensor):
+                active = active | expansion_positions[begin:end].bool()
+            active_columns = active.any(dim=0)
             if active_columns.any():
                 last_active = int(active_columns.nonzero().max().item())
                 if last_active + 1 < seq_width:

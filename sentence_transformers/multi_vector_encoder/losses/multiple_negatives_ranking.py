@@ -7,6 +7,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
+from sentence_transformers.base.losses.merged_forward import embed_columns_padded
 from sentence_transformers.multi_vector_encoder.model import MultiVectorEncoder
 from sentence_transformers.multi_vector_encoder.scoring import colbert_scores
 from sentence_transformers.util import (
@@ -39,6 +40,13 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
             similarities (range ``~[0, num_query_tokens]``), so it needs no amplification. This is the same
             reason the dense loss recommends ``scale=1`` for dot-product similarity. ``scale=20`` here would
             saturate the softmax and kill gradients.
+        mini_batch_size: Maximum number of rows per model forward during the **embedding** phase. The
+            document columns are merged into one ``batch_size * N``-row batch and split into row chunks,
+            each embedded at its own width, so a single long outlier document only widens its own chunk.
+            Chunking is exact (no cross-row interactions), but every chunk's activations stay live for
+            the backward pass, so this bounds padding waste rather than total memory: reach for
+            :class:`CachedMultiVectorMultipleNegativesRankingLoss` to bound memory by chunk size.
+            ``None`` runs the merged batch in one forward.
         score_mini_batch_size: If set, queries are processed in chunks of this size during the scoring
             phase. Useful to bound transient scoring memory for large effective batch sizes. Gradients
             still flow through a single backward.
@@ -58,11 +66,16 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
         +-------------------------------------------------+--------+
     """
 
+    # Enables per-sample media counting in Transformer.preprocess, so mini-batching can slice VLM
+    # inputs (e.g. Qwen2-VL's flattened pixel_values) along the batch dimension.
+    requires_media_counts = True
+
     def __init__(
         self,
         model: MultiVectorEncoder,
         score_metric: Callable | None = None,
         scale: float = 1.0,
+        mini_batch_size: int | None = None,
         score_mini_batch_size: int | None = None,
         size_average: bool = True,
         gather_across_devices: bool = False,
@@ -71,6 +84,7 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
         self.model = model
         self.score_metric = score_metric if score_metric is not None else colbert_scores
         self.scale = scale
+        self.mini_batch_size = mini_batch_size
         self.score_mini_batch_size = score_mini_batch_size
         self.size_average = size_average
         self.gather_across_devices = gather_across_devices
@@ -85,6 +99,7 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
         return {
             "score_metric": score_metric,
             "scale": self.scale,
+            "mini_batch_size": self.mini_batch_size,
             "score_mini_batch_size": self.score_mini_batch_size,
             "size_average": self.size_average,
             "gather_across_devices": self.gather_across_devices,
@@ -99,25 +114,27 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
         # The collator stamps each column's tokenization task (column 0 is the query unless
         # router_mapping overrides it). The MultiVectorMask module reads `task` from forward
         # kwargs and rewrites the output attention_mask into the per-row scoring mask.
-        outputs = [
-            self.model(sf, task=sf.get("task", "query" if idx == 0 else "document"))
-            for idx, sf in enumerate(sentence_features)
-        ]
-        embeddings = [output["token_embeddings"] for output in outputs]
+        query_features = sentence_features[0]
+        query_outputs = self.model(query_features, task=query_features.get("task", "query"))
+        query_embeddings = query_outputs["token_embeddings"]
+        q_mask = query_outputs["attention_mask"].bool()
 
-        batch_size = embeddings[0].size(0)
-        N = len(embeddings) - 1
-        q_mask = outputs[0]["attention_mask"].bool()
-        doc_masks = [output["attention_mask"].bool() for output in outputs[1:]]
+        batch_size = query_embeddings.size(0)
+        N = len(sentence_features) - 1
+
+        doc_embeddings, doc_masks = embed_columns_padded(
+            self.model, sentence_features[1:], self.mini_batch_size, task_default="document"
+        )
+
         if self.gather_across_devices:
             # Gather doc embeddings + masks across ranks so every rank's queries see the global doc
             # batch. Pad the token axis to the cross-rank max first: each rank pads its columns to its
             # own batch-longest, so T differs per rank and all_gather needs a uniform shape per rank.
-            gathered = [all_gather_padded(e, m, with_grad=True) for e, m in zip(embeddings[1:], doc_masks)]
-            embeddings = [embeddings[0], *[e for e, _ in gathered]]
+            gathered = [all_gather_padded(e, m, with_grad=True) for e, m in zip(doc_embeddings, doc_masks)]
+            doc_embeddings = [e for e, _ in gathered]
             doc_masks = [m for _, m in gathered]
 
-        docs_stacked, docs_mask_stacked = stack_padded_token_embeddings(embeddings[1:], doc_masks)
+        docs_stacked, docs_mask_stacked = stack_padded_token_embeddings(doc_embeddings, doc_masks)
 
         step = self.score_mini_batch_size or batch_size
         score_chunks = []
@@ -125,7 +142,7 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
             end = begin + step
             score_chunks.append(
                 self.score_metric(
-                    embeddings[0][begin:end],
+                    query_embeddings[begin:end],
                     docs_stacked,
                     queries_mask=q_mask[begin:end],
                     documents_mask=docs_mask_stacked,
@@ -134,7 +151,7 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
         scores = torch.cat(score_chunks, dim=0)
 
         # Query-major layout: positive for query i is at column i*N (cf. colbert_scores).
-        labels = torch.arange(batch_size, device=embeddings[0].device) * N
+        labels = torch.arange(batch_size, device=query_embeddings.device) * N
         if self.gather_across_devices:
             labels = labels + get_rank() * batch_size * N
 

@@ -16,6 +16,7 @@ import torch
 from torch import Tensor, nn
 
 from sentence_transformers.base.losses.gradcache import _minibatch_ranges
+from sentence_transformers.base.losses.merged_forward import column_merging_disabled, merge_feature_batches
 from sentence_transformers.multi_vector_encoder import losses as mve_losses
 
 
@@ -463,3 +464,159 @@ def test_distill_kl_div_validates_input_columns_and_label_shape() -> None:
     documents = [_make_feature(t_tokens=6, batch=3, dim=8, seed=2 + way) for way in range(2)]
     with pytest.raises(ValueError, match="teacher scores"):
         loss([queries, *documents], torch.randn(3, 3))
+
+
+class _TokenizingModel(nn.Module):
+    """Embeds integer ``input_ids`` as one-hot vectors, mirroring how a real model turns padded
+    token batches into embeddings while the attention mask marks the real positions."""
+
+    def __call__(self, features: dict[str, Tensor], task: str | None = None) -> dict[str, Tensor]:
+        return {
+            "token_embeddings": torch.nn.functional.one_hot(features["input_ids"], num_classes=17).float(),
+            "attention_mask": features["attention_mask"],
+        }
+
+
+def _int_column(t_tokens: int, seed: int, batch: int = 2, left_pad: int = 0) -> dict[str, Tensor]:
+    generator = torch.Generator().manual_seed(seed)
+    input_ids = torch.randint(1, 17, (batch, t_tokens), generator=generator)
+    attention_mask = torch.ones(batch, t_tokens, dtype=torch.long)
+    if left_pad:
+        attention_mask[:, :left_pad] = 0
+    return {"input_ids": input_ids, "attention_mask": attention_mask}
+
+
+def _int_features() -> list[dict[str, Tensor]]:
+    # One left-padded column so the chunk trim window must respect padding on either side.
+    return [
+        _int_column(6, seed=1),
+        _int_column(10, seed=2),
+        _int_column(12, seed=3, left_pad=3),
+        _int_column(14, seed=4),
+    ]
+
+
+def test_distill_kl_div_merged_forward_matches_per_column() -> None:
+    """The merged (batch_size * n_ways) document forward must score identically to the per-column
+    fallback: for equal-width float columns (merge without padding) and for ragged integer token
+    columns (the zero-pad branch, whose padded positions carry attention 0 and never reach scoring)."""
+    batch = 2
+    kd_labels = torch.tensor([[5.0, 1.0, 0.1], [4.0, 0.5, 0.2]])
+
+    def float_features() -> list[dict[str, Tensor]]:
+        return [_make_feature(6, batch, 8, seed=7)] + [_make_feature(10, batch, 8, seed=8 + way) for way in range(3)]
+
+    loss = mve_losses.MultiVectorDistillKLDivLoss(model=_PassthroughModel())
+    assert merge_feature_batches(float_features()[1:]) is not None
+    merged_value = loss(float_features(), kd_labels).item()
+    with column_merging_disabled():
+        fallback_value = loss(float_features(), kd_labels).item()
+    assert abs(merged_value - fallback_value) < 1e-6
+
+    loss = mve_losses.MultiVectorDistillKLDivLoss(model=_TokenizingModel())
+    assert merge_feature_batches(_int_features()[1:]) is not None
+    merged_value = loss(_int_features(), kd_labels).item()
+    with column_merging_disabled():
+        fallback_value = loss(_int_features(), kd_labels).item()
+    assert abs(merged_value - fallback_value) < 1e-6
+
+    # Ragged float columns cannot be zero-padded safely: the merge must refuse and fall back.
+    ragged_float = [_make_feature(10, batch, 8, seed=1), _make_feature(12, batch, 8, seed=2)]
+    assert merge_feature_batches(ragged_float) is None
+    # Row-misaligned VLM features must refuse as well, even when homogeneous.
+    vlm_like = [
+        {"input_ids": torch.ones(batch, 4, dtype=torch.long), "pixel_values": torch.randn(7, 3)} for _ in range(2)
+    ]
+    assert merge_feature_batches(vlm_like) is None
+
+
+def test_distill_kl_div_mini_batch_matches_full() -> None:
+    """mini_batch_size splits the merged forward into row chunks, each embedded at its own width
+    (leading padding kept, so the left-padded column keeps its positions): the loss must not change."""
+    kd_labels = torch.tensor([[5.0, 1.0, 0.1], [4.0, 0.5, 0.2]])
+
+    full = mve_losses.MultiVectorDistillKLDivLoss(model=_TokenizingModel())
+    chunked = mve_losses.MultiVectorDistillKLDivLoss(model=_TokenizingModel(), mini_batch_size=2)
+    full_value = full(_int_features(), kd_labels).item()
+    chunked_value = chunked(_int_features(), kd_labels).item()
+    assert abs(full_value - chunked_value) < 1e-6
+
+    # The fallback path chunks each column forward too.
+    with column_merging_disabled():
+        chunked_fallback_value = chunked(_int_features(), kd_labels).item()
+    assert abs(full_value - chunked_fallback_value) < 1e-6
+
+    assert full.get_config_dict()["mini_batch_size"] is None
+    assert chunked.get_config_dict()["mini_batch_size"] == 2
+
+
+def test_margin_mse_merged_forward_matches_per_column() -> None:
+    """MarginMSE splits the merged forward straight back into per-column tensors: merged, chunked,
+    and per-column fallback paths must all produce the same loss."""
+    margins = torch.tensor([[0.4, 1.2], [0.1, 0.6]])
+
+    merged = mve_losses.MultiVectorMarginMSELoss(model=_TokenizingModel())
+    chunked = mve_losses.MultiVectorMarginMSELoss(model=_TokenizingModel(), mini_batch_size=2)
+    merged_value = merged(_int_features(), margins).item()
+    chunked_value = chunked(_int_features(), margins).item()
+    with column_merging_disabled():
+        fallback_value = merged(_int_features(), margins).item()
+    assert abs(merged_value - fallback_value) < 1e-6
+    assert abs(chunked_value - fallback_value) < 1e-6
+
+
+def test_mnrl_merged_forward_matches_per_column() -> None:
+    """MNRL merges only the document columns, keeping the query column on its own forward: merged,
+    chunked, and per-column fallback paths must all produce the same loss."""
+    merged = mve_losses.MultiVectorMultipleNegativesRankingLoss(model=_TokenizingModel())
+    chunked = mve_losses.MultiVectorMultipleNegativesRankingLoss(model=_TokenizingModel(), mini_batch_size=2)
+    merged_value = merged(_int_features()).item()
+    chunked_value = chunked(_int_features()).item()
+    with column_merging_disabled():
+        fallback_value = merged(_int_features()).item()
+    assert abs(merged_value - fallback_value) < 1e-6
+    assert abs(chunked_value - fallback_value) < 1e-6
+
+    assert merged.get_config_dict()["mini_batch_size"] is None
+    assert chunked.get_config_dict()["mini_batch_size"] == 2
+
+
+def test_merge_refuses_inside_column_merging_disabled() -> None:
+    """Wrapper losses that call an inner loss repeatedly with the same feature dicts (AdaptiveLayerLoss)
+    pass state through those dicts, which fresh merged dicts would strand."""
+    columns = [_int_column(6, seed=1), _int_column(6, seed=2)]
+    assert merge_feature_batches(columns) is not None
+    with column_merging_disabled():
+        assert merge_feature_batches(columns) is None
+    assert merge_feature_batches(columns) is not None
+
+
+def test_merge_refuses_non_tensor_values_that_do_not_compare() -> None:
+    """A custom preprocess_fn can put values in the batch whose ``!=`` returns an array rather than a
+    bool. Those cannot be shown equal across columns, so the merge must refuse instead of raising."""
+    numpy = pytest.importorskip("numpy")
+    columns = [
+        {**_int_column(6, seed=1), "custom": numpy.array([1, 2, 3])},
+        {**_int_column(6, seed=2), "custom": numpy.array([1, 2, 3])},
+    ]
+    assert merge_feature_batches(columns) is None
+
+
+def test_merge_refuses_flattened_features() -> None:
+    """FA2-flattened columns pack their rows into one sequence described by ``cu_seq_lens_q``.
+    Concatenating those offsets end to end describes nothing, so the merge must refuse and let the
+    caller fall back to per-column forwards."""
+    from transformers import DataCollatorWithFlattening
+
+    collator = DataCollatorWithFlattening(return_tensors="pt", return_flash_attn_kwargs=True)
+    columns = [
+        {key: value for key, value in collator(rows).items() if key != "labels"}
+        for rows in (
+            [{"input_ids": [1, 2, 3]}, {"input_ids": [4, 5]}],
+            [{"input_ids": [6, 7]}, {"input_ids": [8, 9, 10]}],
+        )
+    ]
+    assert "cu_seq_lens_q" in columns[0]
+    # Equal per-column longest documents, so the max_length_q metadata match cannot mask the refusal.
+    assert columns[0]["max_length_q"] == columns[1]["max_length_q"]
+    assert merge_feature_batches(columns) is None

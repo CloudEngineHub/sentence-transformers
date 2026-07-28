@@ -6,6 +6,7 @@ from typing import Any
 import torch
 from torch import Tensor, nn
 
+from sentence_transformers.base.losses.merged_forward import embed_columns_padded
 from sentence_transformers.multi_vector_encoder.model import MultiVectorEncoder
 from sentence_transformers.util.similarity import maxsim_pairwise
 
@@ -29,18 +30,28 @@ class MultiVectorMarginMSELoss(nn.Module):
         similarity_fct: A pairwise scoring function. Defaults to
             :func:`~sentence_transformers.util.maxsim_pairwise`.
         size_average: ``True`` (default) averages the MSE across the batch. ``False`` sums.
+        mini_batch_size: Maximum number of rows per model forward. The merged document batch is
+            split into row chunks, each re-trimmed to its own longest document, so a single long
+            outlier document only widens its own chunk. Chunking is exact for this loss (no
+            cross-row interactions). ``None`` (default) runs one merged forward.
     """
+
+    # Enables per-sample media counting in Transformer.preprocess, so mini-batching can slice VLM
+    # inputs (e.g. Qwen2-VL's flattened pixel_values) along the batch dimension.
+    requires_media_counts = True
 
     def __init__(
         self,
         model: MultiVectorEncoder,
         similarity_fct: Callable | None = None,
         size_average: bool = True,
+        mini_batch_size: int | None = None,
     ) -> None:
         super().__init__()
         self.model = model
         self.similarity_fct = similarity_fct if similarity_fct is not None else maxsim_pairwise
         self.size_average = size_average
+        self.mini_batch_size = mini_batch_size
         self.loss_function = nn.MSELoss(reduction="mean" if size_average else "sum")
 
     def get_config_dict(self) -> dict[str, Any]:
@@ -53,6 +64,7 @@ class MultiVectorMarginMSELoss(nn.Module):
         return {
             "similarity_fct": similarity_fct,
             "size_average": self.size_average,
+            "mini_batch_size": self.mini_batch_size,
         }
 
     def _score(
@@ -74,15 +86,17 @@ class MultiVectorMarginMSELoss(nn.Module):
 
         # Collator-stamped tasks (positional fallback), masks from the model output where
         # MultiVectorMask has rewritten attention_mask into the per-row scoring mask.
-        outputs = [
-            self.model(sf, task=sf.get("task", "query" if idx == 0 else "document"))
-            for idx, sf in enumerate(sentence_features)
-        ]
-        embeddings = [output["token_embeddings"] for output in outputs]
-        masks = [output["attention_mask"].bool() for output in outputs]
+        query_features = sentence_features[0]
+        query_outputs = self.model(query_features, task=query_features.get("task", "query"))
+        q = query_outputs["token_embeddings"]
+        q_mask = query_outputs["attention_mask"].bool()
 
-        q, pos, *negs = embeddings
-        q_mask, pos_mask, *neg_masks = masks
+        embeddings, masks = embed_columns_padded(
+            self.model, sentence_features[1:], self.mini_batch_size, task_default="document"
+        )
+
+        pos, *negs = embeddings
+        pos_mask, *neg_masks = masks
         pos_scores = self._score(q, pos, q_mask, pos_mask)
 
         if labels.ndim == 1:

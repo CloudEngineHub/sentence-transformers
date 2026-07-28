@@ -476,6 +476,26 @@ def test_create_minibatch_keeps_left_padding() -> None:
     assert _create_minibatch(feature, 0, 3)["attention_mask"].shape[1] == width
 
 
+def test_create_minibatch_keeps_query_expansion_positions() -> None:
+    """ColBERT expansion positions carry attention_mask 0 but are still scored, so the trailing trim
+    must not drop them: doing so silently shrinks a 32-token query to its handful of real tokens."""
+    width, floor = 8, 8
+    mask = torch.zeros(4, width, dtype=torch.long)
+    for row, length in enumerate([3, 4, 2, 3]):
+        mask[row, :length] = 1
+    expansion_positions = (mask == 0) & (torch.arange(width) < floor)
+    feature = {
+        "input_ids": torch.ones(4, width, dtype=torch.long),
+        "attention_mask": mask,
+        "query_expansion_positions": expansion_positions,
+    }
+
+    for begin, end in ((0, 4), (0, 2), (2, 4)):
+        minibatch = _create_minibatch(feature, begin, end)
+        assert minibatch["attention_mask"].shape[1] == width
+        torch.testing.assert_close(minibatch["query_expansion_positions"], expansion_positions[begin:end])
+
+
 def test_gradcache_token_budget_trims_but_matches_mnrl(stsb_bert_tiny_model: SentenceTransformer) -> None:
     """Trimming padded mini-batches to their own width must not change the loss or gradient: the dropped
     columns are padding for every sequence in the mini-batch, so the transformer ignores them anyway."""
