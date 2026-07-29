@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gc
 import tempfile
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -1008,6 +1009,27 @@ def test_encode_pooling_compounds_and_notes_when_module_present(caplog) -> None:
     # Compounded: strictly fewer tokens than module-only (the per-call pool runs on top).
     assert module_plus_kwarg[0].shape[0] < module_only[0].shape[0]
     assert any("compounding" in record.message for record in caplog.records)
+
+
+def test_encode_empty_list_padded_shape(model: MultiVectorEncoder) -> None:
+    assert model.encode([]) == []
+    padded = model.encode([], convert_to_padded_tensor=True)
+    # Shape-consistent with non-empty output, matching BaseTokenPooling.pool's batch=0 case, and
+    # on the same device, so it can be concatenated or scored alongside one.
+    non_empty = model.encode(["a document"], convert_to_padded_tensor=True)
+    assert padded.shape == (0, 0, model.get_embedding_dimension())
+    assert padded.device == non_empty.device
+    assert model.similarity(padded, non_empty).shape == (0, 1)
+
+
+@pytest.mark.parametrize("precision", ["float32", "int8"])
+def test_encode_padded_tensor_stays_on_model_device(
+    model: MultiVectorEncoder, precision: Literal["float32", "int8"]
+) -> None:
+    # Quantization restores tensors via torch.from_numpy, which lands on the CPU regardless of the
+    # model's device, so the padded output has to be normalized back.
+    padded = model.encode(["a document", "another one"], convert_to_padded_tensor=True, precision=precision)
+    assert padded.device == model.device
 
 
 def test_similarity_function_enum_has_maxsim() -> None:

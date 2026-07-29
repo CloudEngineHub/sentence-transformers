@@ -527,8 +527,7 @@ class MultiVectorEncoder(BaseModel):
 
         return result
 
-    @staticmethod
-    def _stack_padded(embeddings: Sequence[Tensor | np.ndarray]) -> Tensor:
+    def _stack_padded(self, embeddings: Sequence[Tensor | np.ndarray]) -> Tensor:
         """Pad a variable-length list of per-input 2D embeddings into one
         ``(num_inputs, max_tokens, embedding_dim)`` tensor, padding with 0. Always right-padded
         (regardless of the tokenizer's padding side): the input tokenizer's convention is not
@@ -537,9 +536,9 @@ class MultiVectorEncoder(BaseModel):
         row (possible after token pooling) aliases with padding. See ``_zero_row_mask``.
         """
         if not embeddings:
-            return torch.empty(0)
+            return torch.empty(0, 0, self.get_embedding_dimension() or 0, device=self.device)
         tensors = [torch.from_numpy(emb) if isinstance(emb, np.ndarray) else emb for emb in embeddings]
-        return torch.nn.utils.rnn.pad_sequence(tensors, batch_first=True, padding_value=0)
+        return torch.nn.utils.rnn.pad_sequence(tensors, batch_first=True, padding_value=0).to(self.device)
 
     @property
     def similarity_fn_name(self) -> Literal["maxsim"]:
