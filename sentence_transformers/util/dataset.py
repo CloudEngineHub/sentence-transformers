@@ -318,6 +318,26 @@ def resolve_ids(
             "document_ids": documents,
         }, output_format="lists"))
         # -> rows of {"query": str, "documents": list[str], "scores": list[float]}
+
+    Example (streaming)::
+
+        from datasets import Features, Sequence, Value
+
+        # Only the train split streams. The lookup datasets are random-access joins, so they
+        # must stay regular (materialized) Datasets.
+        train = load_dataset("lightonai/ms-marco-en-bge", "train", split="train", streaming=True)
+        train = train.map(
+            resolve_ids({"query_id": queries, "document_ids": documents}, max_list_length=32),
+            batched=True,
+            remove_columns=["query_id", "document_ids"],
+            features=Features({
+                "query": Value("string"),
+                **{f"document_{i}": Value("string") for i in range(1, 33)},
+                "scores": Sequence(Value("float32")),
+            }),
+        )
+        # Streaming map cannot infer the output schema, and the trainers require it, so pass
+        # ``features=`` explicitly.
     """
     try:
         from datasets import Dataset, DatasetDict

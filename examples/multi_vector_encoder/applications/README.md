@@ -10,4 +10,12 @@ MultiVectorEncoder models score with the MaxSim late-interaction operator, which
 
 [retrieve_rerank.py](retrieve_rerank.py) combines a fast bi-encoder first stage with a MultiVectorEncoder second stage: the bi-encoder narrows a large corpus down to a handful of candidates, and the multi-vector model rescores only those. This keeps the index small while still paying for late interaction where it matters, and the script prints the timings of both stages so you can see the tradeoff.
 
+## Interpretability
+
+Because MaxSim scores are sums of per-query-token maxima, a multi-vector ranking can be traced back to the exact tokens (or image patches) that produced it. [heatmap.py](../interpretability/heatmap.py) shows the standard ColPali visualization: for a query and a page image, it overlays heatmaps showing which patches contribute most to the ranking score, summed and per query token. Useful for spot-checking why a retrieval ranking surfaced (or missed) a page. The underlying utilities live in `sentence_transformers.multi_vector_encoder.interpretability`, including `maxsim_similarity_map` for the raw query-token to document-token similarity matrix of text documents.
+
+## Compression
+
+[token_pooling.py](../compression/token_pooling.py) shrinks the document index with `HierarchicalTokenPooling`, which clusters each document's token vectors and mean-pools each cluster. The script compares pool factors and prints the token-count reduction next to the MaxSim score drift, and shows the three ways to apply a pooling: per encode call, standalone on cached embeddings, or baked into the model as a pipeline module.
+
 For visual document retrieval (matching text queries against page images directly, skipping OCR), see the [multimodal training examples](../training/multimodal/README.md).
