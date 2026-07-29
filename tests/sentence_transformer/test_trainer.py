@@ -288,6 +288,33 @@ def test_trainer(
         assert not torch.equal(original_embeddings, new_embeddings)
 
 
+def test_trainer_featureless_iterable_dataset_hint_covers_list_columns(
+    stsb_bert_tiny_model: SentenceTransformer,
+) -> None:
+    # Streaming map without features= loses the schema. The suggested Features snippet must
+    # render KD-style list columns as list features, not the invalid Value('null').
+    train_dataset = Dataset.from_dict(
+        {"sentence1": ["a"], "sentence2": ["b"], "scores": [[1.0, 0.5]]}
+    ).to_iterable_dataset()
+    train_dataset = train_dataset.map(lambda batch: batch, batched=True)
+    assert train_dataset.column_names is None
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        args = SentenceTransformerTrainingArguments(output_dir=str(temp_dir))
+        with pytest.raises(ValueError, match="must have Features") as excinfo:
+            SentenceTransformerTrainer(
+                model=stsb_bert_tiny_model,
+                args=args,
+                train_dataset=train_dataset,
+                loss=CosineSimilarityLoss(model=stsb_bert_tiny_model),
+            )
+
+    message = str(excinfo.value)
+    assert "null" not in message
+    assert "'sentence1': Value('string')" in message
+    assert "'scores': List(Value('float32'))" in message or "'scores': Sequence(" in message
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize("train_dict", [False, True])
 @pytest.mark.parametrize("eval_dict", [False, True])
