@@ -775,14 +775,12 @@ class BaseModelCardData(CardData):
 
     @staticmethod
     def _hash_asset(value: Any) -> int | None:
-        """Compute a content hash for an asset value, or None if the type is not supported."""
-        # AudioDecoder supports dict-like access but is not a dict
-        if AudioDecoder is not None and isinstance(value, AudioDecoder):
-            value = {"array": value["array"], "sampling_rate": value["sampling_rate"]}
-        # VideoDecoder: hash based on metadata (source path, duration, resolution)
-        if VideoDecoder is not None and isinstance(value, VideoDecoder):
-            m = value.metadata
-            return hash((getattr(m, "path", None), m.duration_seconds, m.width, m.height, m.num_frames))
+        """Compute an identity hash for an asset value, or None if the type is not supported."""
+        # Audio / Video decoders carry the encoded source datasets re-encodes from. Hashing that
+        # avoids a decode, and beats decoder metadata, which collides across same-shape clips.
+        encoded = getattr(value, "_hf_encoded", None)
+        if isinstance(encoded, dict) and (encoded.get("bytes") or encoded.get("path")):
+            return hash((encoded.get("path"), encoded.get("bytes")))
         if PILImage and isinstance(value, PILImage):
             return hash((value.tobytes(), value.size, value.mode))
         if isinstance(value, dict) and "array" in value:

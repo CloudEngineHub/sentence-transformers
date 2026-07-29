@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 import tempfile
 from contextlib import contextmanager
@@ -977,12 +978,15 @@ class _MockVideoDecoder:
         frames: torch.Tensor | None = None,
         fail_batch: bool = False,
         fail_single: bool = False,
+        hf_encoded: dict | None = None,
     ):
         if metadata is not None:
             self.metadata = metadata
         else:
             path = source if isinstance(source, str) else None
             self.metadata = _MockVideoMetadata(path=path)
+        # datasets' Video feature stamps the encoded source onto every decoder it hands out.
+        self._hf_encoded = hf_encoded if hf_encoded is not None else {"path": self.metadata.path, "bytes": None}
         nf = self.metadata.num_frames
         h, w = self.metadata.height, self.metadata.width
         self._frames = frames if frames is not None else torch.randint(0, 255, (nf, 3, h, w), dtype=torch.uint8)
@@ -1024,7 +1028,7 @@ class TestHashAssetVideoDecoder:
     """Test _hash_asset for VideoDecoder inputs."""
 
     def test_consistent_hash(self) -> None:
-        """Same metadata produces the same hash."""
+        """The same encoded source produces the same hash."""
         with _patch_video_decoder():
             kwargs = dict(path="/v.mp4", duration_seconds=2.0, width=64, height=64, num_frames=8)
             dec1 = _make_mock_video_decoder(**kwargs)
@@ -1034,11 +1038,27 @@ class TestHashAssetVideoDecoder:
             assert h1 is not None
             assert h1 == h2
 
-    def test_different_metadata_different_hash(self) -> None:
+    def test_different_source_different_hash(self) -> None:
         with _patch_video_decoder():
-            dec1 = _make_mock_video_decoder(width=64)
-            dec2 = _make_mock_video_decoder(width=128)
+            dec1 = _make_mock_video_decoder(path="/one.mp4")
+            dec2 = _make_mock_video_decoder(path="/two.mp4")
             assert BaseModelCardData._hash_asset(dec1) != BaseModelCardData._hash_asset(dec2)
+
+    def test_same_shape_different_bytes_are_distinct(self) -> None:
+        # Decoder metadata (path, duration, resolution, frame count) is identical for any two
+        # in-memory clips of the same shape, so hashing it collapsed them into one asset.
+        with _patch_video_decoder():
+            dec1 = _MockVideoDecoder(hf_encoded={"path": None, "bytes": b"first clip"})
+            dec2 = _MockVideoDecoder(hf_encoded={"path": None, "bytes": b"second clip"})
+            assert dec1.metadata.__dict__ == dec2.metadata.__dict__
+            assert BaseModelCardData._hash_asset(dec1) != BaseModelCardData._hash_asset(dec2)
+
+    def test_unsourced_decoder_is_not_hashable(self) -> None:
+        # Nothing to identify it by, so report None and let the caller keep both examples rather
+        # than collapse every such decoder onto one hash.
+        with _patch_video_decoder():
+            dec = _MockVideoDecoder(hf_encoded={"path": None, "bytes": None})
+            assert BaseModelCardData._hash_asset(dec) is None
 
 
 class TestVideoDecoderToDict:
@@ -1257,6 +1277,33 @@ class TestFormatAndSaveExampleVideoDecoder:
 _can_test_video_dataset = (
     is_datasets_available() and VideoFeature is not None and _av is not None and _torchcodec is not None
 )
+
+
+@pytest.mark.skipif(not _can_test_video_dataset, reason="datasets Video feature or torchcodec encoder not available")
+def test_hash_asset_distinguishes_real_same_shape_videos() -> None:
+    """Two real in-memory clips of identical shape and duration must not collapse to one asset."""
+
+    def encode(seed: int) -> bytes:
+        buffer = io.BytesIO()
+        with _av.open(buffer, mode="w", format="mp4") as container:
+            stream = container.add_stream("h264", rate=10)
+            stream.width, stream.height, stream.pix_fmt = 64, 64, "yuv420p"
+            generator = np.random.default_rng(seed)
+            for _ in range(8):
+                frame_data = generator.integers(0, 255, (64, 64, 3), dtype=np.uint8)
+                for packet in stream.encode(_av.VideoFrame.from_ndarray(frame_data, format="rgb24")):
+                    container.mux(packet)
+            for packet in stream.encode():
+                container.mux(packet)
+        return buffer.getvalue()
+
+    dataset = Dataset.from_dict({"video": [{"bytes": encode(1), "path": None}, {"bytes": encode(2), "path": None}]})
+    dataset = dataset.cast_column("video", VideoFeature())
+    first, second = dataset[0]["video"], dataset[1]["video"]
+    assert (first.metadata.width, first.metadata.num_frames) == (second.metadata.width, second.metadata.num_frames)
+    assert BaseModelCardData._hash_asset(first) != BaseModelCardData._hash_asset(second)
+    # And the decoder is rebuilt per access, so the hash must survive a re-read of the same row.
+    assert BaseModelCardData._hash_asset(first) == BaseModelCardData._hash_asset(dataset[0]["video"])
 
 
 @contextmanager
