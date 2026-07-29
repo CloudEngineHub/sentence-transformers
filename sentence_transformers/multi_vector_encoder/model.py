@@ -336,8 +336,9 @@ class MultiVectorEncoder(BaseModel):
                 embeddings, sliced by the scoring mask. ``None`` returns the raw per-input module
                 output dicts instead: every feature key (``token_embeddings``, ``attention_mask``,
                 and any extra keys custom modules wrote), unsliced and padded to each batch's
-                longest input. With ``None``, normalization, pooling, ``precision``, and the
-                ``convert_to_*`` options do not apply.
+                longest input. With ``None``, normalization, ``precision``, and the
+                ``convert_to_*`` options do not apply. Per-call ``pooling`` does apply: it
+                rewrites ``token_embeddings`` and ``attention_mask`` in the dicts.
             convert_to_tensor (bool, optional): If True, returns a list of :class:`torch.Tensor`. Overrides
                 ``convert_to_numpy``. Defaults to False.
             convert_to_numpy (bool, optional): If True (default), returns a list of :class:`numpy.ndarray`.
@@ -364,7 +365,8 @@ class MultiVectorEncoder(BaseModel):
                 after the pipeline. Skips queries unless the pooling was built with
                 ``pool_queries=True``. If the model already bakes a pooling into its pipeline, this
                 compounds on top of it (pooling further). A one-time note is logged so the case is
-                discoverable. Defaults to None.
+                discoverable. With ``output_value=None``, applied to the raw dicts
+                (``token_embeddings`` and ``attention_mask`` are rewritten). Defaults to None.
             task (str, optional): One of ``"query"``, ``"document"``. Sets the prefix / length /
                 masking strategy.
 
@@ -464,6 +466,15 @@ class MultiVectorEncoder(BaseModel):
                 # Route through __call__ so that model.compile() applies to the forward pass.
                 features = self(features, task=task)
                 if output_value is None:
+                    # Unlike normalization and precision, pooling applies here, as ST's truncate_dim does.
+                    if pooling is not None and (not is_query or pooling.pool_queries):
+                        if any(isinstance(module, BaseTokenPooling) for module in self):
+                            logger.warning_once(
+                                "This model already includes a token pooling in its pipeline: the per-call "
+                                "`pooling=` pools further on top of it (compounding). Omit it if you only want "
+                                "the model's built-in pooling."
+                            )
+                        features = pooling(features, task=task)
                     # Raw per-input module outputs, unsliced. Batch-first tensors are split per
                     # input, other values (ints, strings, flattened tensors) are carried as-is.
                     for idx in range(len(inputs_batch)):

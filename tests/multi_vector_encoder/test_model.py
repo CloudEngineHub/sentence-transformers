@@ -1011,6 +1011,40 @@ def test_encode_pooling_compounds_and_notes_when_module_present(caplog) -> None:
     assert any("compounding" in record.message for record in caplog.records)
 
 
+def test_encode_pooling_applies_to_raw_output(model: MultiVectorEncoder) -> None:
+    # Per-call transforms also apply to raw output, like ST's truncate_dim. The pooling module's
+    # forward slices each row by its mask before clustering, so batch padding never reaches the
+    # pooling, and the rewritten mask marks the pooled rows: mask-sliced raw output is bit-exact
+    # vs the normal (list of 2D) path.
+    texts = [
+        "short doc",
+        "a fairly long document with plenty of distinct tokens to cluster together here",
+        "medium length document with several tokens",
+    ]
+    pooling = HierarchicalTokenPooling(pool_factor=2)
+    normal = model.encode_document(texts, pooling=pooling, convert_to_tensor=True)
+    raw = model.encode_document(texts, output_value=None, pooling=pooling)
+    assert isinstance(raw, list)
+    # The ragged batch must actually contain padded rows for this test to mean anything.
+    assert any(not item["attention_mask"].bool().all() for item in raw)
+    for item, pooled_reference in zip(raw, normal):
+        mask = item["attention_mask"].bool()
+        assert torch.equal(item["token_embeddings"][mask], pooled_reference)
+
+
+def test_encode_pooling_skips_queries_on_raw_output(model: MultiVectorEncoder) -> None:
+    # The raw path gates queries twice, on encode's ``is_query`` and on the module forward's
+    # ``task``, so both sides of the gate are pinned here.
+    query = "a fairly long query with plenty of distinct tokens to cluster together here"
+    unpooled = model.encode_query(query, output_value=None)["token_embeddings"]
+    skipped = model.encode_query(query, output_value=None, pooling=HierarchicalTokenPooling(pool_factor=2))
+    opted_in = model.encode_query(
+        query, output_value=None, pooling=HierarchicalTokenPooling(pool_factor=2, pool_queries=True)
+    )
+    assert skipped["token_embeddings"].shape == unpooled.shape
+    assert opted_in["token_embeddings"].shape[0] < unpooled.shape[0]
+
+
 def test_encode_empty_list_padded_shape(model: MultiVectorEncoder) -> None:
     assert model.encode([]) == []
     padded = model.encode([], convert_to_padded_tensor=True)
