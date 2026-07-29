@@ -5,6 +5,7 @@ from collections.abc import Callable, Mapping
 from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
+import numpy as np
 from transformers.utils import logging as transformers_logging
 
 if TYPE_CHECKING:
@@ -72,11 +73,61 @@ def _parse_string_encoded_lists(column: list, col_name: str) -> list:
     return parsed
 
 
-def _take(ids: list, value_view, index: dict, value_col: str, input_col: str) -> list:
+class _SortedIdIndex:
+    """``id -> row position`` lookup backed by sorted numpy arrays.
+
+    A python dict retains a hash table plus every key object, and rebuilds that table in each
+    DataLoader worker on spawn-start platforms. Sorted arrays hold the same lookup in a fraction of
+    the memory and pickle as flat buffers, so they also unpickle far faster. Lookups are a
+    searchsorted rather than a hash, so they take 6x to 16x as long per batch as the dict, which is
+    immaterial next to the forward pass. Only used for homogeneous numeric ids and for strings
+    narrow enough that the fixed-width array stays under the dict's footprint, since numpy sizes
+    such an array by its longest entry.
+    """
+
+    __slots__ = ("keys", "positions")
+
+    def __init__(self, keys: np.ndarray) -> None:
+        order = np.argsort(keys, kind="stable")
+        sorted_keys = keys[order]
+        # Dict semantics: a duplicated ID resolves to its last occurrence. Stable sort keeps
+        # duplicates in original order, so the last of each equal run is the one to keep.
+        keep = np.ones(len(sorted_keys), dtype=bool)
+        if len(sorted_keys) > 1:
+            keep[:-1] = sorted_keys[1:] != sorted_keys[:-1]
+        self.keys = sorted_keys[keep]
+        self.positions = order[keep]
+
+    def __len__(self) -> int:
+        return len(self.keys)
+
+    def lookup(self, ids: np.ndarray) -> np.ndarray:
+        """Return the row positions for ``ids``, raising ``KeyError(missing_id)`` on a miss."""
+        if len(self.keys) == 0:
+            missing = ids[0]
+        else:
+            insertion_points = np.searchsorted(self.keys, ids)
+            clipped = np.minimum(insertion_points, len(self.keys) - 1)
+            found = self.keys[clipped] == ids
+            if found.all():
+                return self.positions[clipped]
+            missing = ids[int(np.argmin(found))]
+        raise KeyError(missing.item() if ids.dtype.kind in "iuf" else str(missing))
+
+
+def _take(ids: list, value_view, index: _SortedIdIndex | dict, value_col: str, input_col: str) -> list:
     if not ids:
         return []
     try:
-        rows = [index[key] for key in ids]
+        if isinstance(index, _SortedIdIndex):
+            queries = np.asarray(ids)
+            if queries.dtype.kind == "O" or queries.dtype.kind != index.keys.dtype.kind:
+                # Mixed / mistyped ids can't hit the typed sorted keys: every id would "miss", so
+                # report the first one as not found, matching the dict path's behaviour.
+                raise KeyError(ids[0])
+            rows = index.lookup(queries).tolist()
+        else:
+            rows = [index[key] for key in ids]
     except TypeError:
         raise TypeError(
             f"IDs from input column {input_col!r} are not hashable, which typically means the train "
@@ -107,7 +158,7 @@ def _add_output_column(resolved: dict[str, Any], name: str, values: list) -> Non
 
 def _resolve_ids_batch(
     batch: dict[str, Any],
-    resolutions: dict[str, tuple[Any, dict, str, str, str]],
+    resolutions: dict[str, tuple[Any, _SortedIdIndex | dict, str, str, str]],
     keep_columns: tuple[str, ...],
     max_list_length: int | None,
     output_format: Literal["columns", "lists"],
@@ -286,8 +337,8 @@ def resolve_ids(
     # output name). Output names are precomputed here so the per-batch transform only formats the
     # position suffix. ID indices are shared between entries that use the same dataset and ID
     # column (e.g. positive_id and negative_id).
-    resolutions: dict[str, tuple[Any, dict, str, str, str]] = {}
-    indices: dict[tuple[int, str], dict] = {}
+    resolutions: dict[str, tuple[Any, _SortedIdIndex | dict, str, str, str]] = {}
+    indices: dict[tuple[int, str], _SortedIdIndex | dict] = {}
     for input_col, lookup_spec in lookups.items():
         if isinstance(lookup_spec, tuple):
             spec = list(lookup_spec)
@@ -334,12 +385,16 @@ def resolve_ids(
         if index_key not in indices:
             # Batched iteration is ~10x faster than materializing the column via dataset[id_col],
             # and unlike raw Arrow access it respects an indices mapping (select / shuffle / filter).
-            index: dict[Any, int] = {}
-            position = 0
-            for batch in dataset.select_columns([id_col]).iter(batch_size=50_000):
-                for value in batch[id_col]:
-                    index[value] = position
-                    position += 1
+            id_values: list = []
+            for id_batch in dataset.select_columns([id_col]).iter(batch_size=50_000):
+                id_values.extend(id_batch[id_col])
+            keys = np.asarray(id_values)
+            # numpy pads a string array to its longest id, so past 128 bytes it costs more than the dict.
+            if keys.ndim == 1 and keys.dtype.kind in "iufUS" and keys.itemsize <= 128:
+                index = _SortedIdIndex(keys)
+            else:
+                # Mixed-type, wide, or otherwise non-sortable ids: the dict handles any hashable key.
+                index = {value: position for position, value in enumerate(id_values)}
             if len(index) != dataset.num_rows:
                 logger.warning_once(
                     f"lookups[{input_col!r}] contains duplicate {id_col!r} values "

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import logging
 
+import numpy as np
 import pytest
 from datasets import Dataset, DatasetDict
 
 from sentence_transformers.util import resolve_ids
+from sentence_transformers.util.dataset import _SortedIdIndex
 
 
 @pytest.fixture
@@ -424,3 +426,98 @@ class TestRobustness:
         mapped = train.with_format("torch").map(transform, batched=True, remove_columns=train.column_names)
         assert sorted(mapped.column_names) == ["document_1", "document_2", "query", "scores"]
         assert len(mapped[0]["scores"]) == 2
+
+
+class TestSortedIdIndex:
+    """The sorted-array index behind resolve_ids lookups (dict fallback for exotic id types)."""
+
+    def test_dedup_keeps_last_occurrence(self) -> None:
+        index = _SortedIdIndex(np.asarray([5, 3, 5, 7]))
+        assert len(index) == 3  # the duplicate-warning trigger, matching dict semantics
+        assert index.lookup(np.asarray([5])).tolist() == [2]
+        assert index.lookup(np.asarray([3, 7, 5])).tolist() == [1, 3, 2]
+
+    def test_missing_id_raises(self) -> None:
+        index = _SortedIdIndex(np.asarray(["d1", "d2"]))
+        with pytest.raises(KeyError):
+            index.lookup(np.asarray(["d1", "nope"]))
+
+    def test_empty_index_raises_keyerror(self) -> None:
+        # An empty lookup dataset must still report a missing ID, not an out-of-bounds IndexError.
+        index = _SortedIdIndex(np.asarray([], dtype="<U4"))
+        with pytest.raises(KeyError):
+            index.lookup(np.asarray(["d1"]))
+
+    def test_string_ids_use_the_sorted_index(self, documents: Dataset) -> None:
+        # The mirror of test_long_string_ids_fall_back_to_dict: ordinary ids take the fast path.
+        transform = resolve_ids({"document_id": documents})
+        assert isinstance(next(iter(transform.keywords["resolutions"].values()))[1], _SortedIdIndex)
+
+    def test_variable_width_string_ids(self) -> None:
+        # numpy pads to the longest ID, so lookups compare arrays of differing itemsize in both
+        # directions depending on which IDs a batch happens to hold.
+        lookup = Dataset.from_dict({"document_id": ["d1", "a_much_longer_document_id", "d2"], "text": ["A", "B", "C"]})
+        train = Dataset.from_dict({"document_id": ["a_much_longer_document_id", "d2", "d1"]})
+        train.set_transform(resolve_ids({"document_id": lookup}))
+        assert [train[i]["document"] for i in range(3)] == ["B", "C", "A"]
+
+    def test_width_cutoff_sits_at_32_characters(self) -> None:
+        # The cutoff is the measured memory crossover: past it the fixed-width array costs more than
+        # the dict it replaces, so widening it regresses the very thing this index exists for.
+        for width, expected in ((32, _SortedIdIndex), (33, dict)):
+            lookup = Dataset.from_dict({"document_id": ["x" * width], "text": ["A"]})
+            transform = resolve_ids({"document_id": lookup})
+            index = next(iter(transform.keywords["resolutions"].values()))[1]
+            assert isinstance(index, expected), f"{width} characters"
+
+    def test_long_string_ids_fall_back_to_dict(self) -> None:
+        # A fixed-width array is sized by the longest ID, so a single long one would cost several
+        # times the dict it replaces.
+        lookup = Dataset.from_dict({"document_id": ["d1", "x" * 300], "text": ["A", "B"]})
+        train = Dataset.from_dict({"document_id": ["x" * 300, "d1"]})
+        transform = resolve_ids({"document_id": lookup})
+        assert isinstance(next(iter(transform.keywords["resolutions"].values()))[1], dict)
+        train.set_transform(transform)
+        assert train[0]["document"] == "B"
+        assert train[1]["document"] == "A"
+
+    def test_empty_lookup_dataset_reports_missing_id(self) -> None:
+        lookup = Dataset.from_dict({"document_id": [], "text": []})
+        train = Dataset.from_dict({"document_id": ["d1"]})
+        train.set_transform(resolve_ids({"document_id": lookup}))
+        with pytest.raises(KeyError, match="was not found in its lookup dataset"):
+            train[0]
+
+    def test_int_ids_resolve_end_to_end(self) -> None:
+        lookup = Dataset.from_dict({"document_id": [10, 20, 30], "text": ["A", "B", "C"]})
+        train = Dataset.from_dict({"document_id": [30, 10]})
+        train.set_transform(resolve_ids({"document_id": lookup}))
+        assert train[0]["document"] == "C"
+        assert train[1]["document"] == "A"
+
+    def test_missing_int_id_message_matches_dict_path(self) -> None:
+        lookup = Dataset.from_dict({"document_id": [10, 20], "text": ["A", "B"]})
+        train = Dataset.from_dict({"document_id": [99]})
+        train.set_transform(resolve_ids({"document_id": lookup}))
+        with pytest.raises(KeyError, match="ID 99 from input column 'document_id' was not found"):
+            train[0]
+
+    def test_wrong_id_type_reports_not_found(self) -> None:
+        # String ids against an integer index cannot match: the first id is reported missing.
+        lookup = Dataset.from_dict({"document_id": [10, 20], "text": ["A", "B"]})
+        train = Dataset.from_dict({"document_id": ["10"]})
+        train.set_transform(resolve_ids({"document_id": lookup}))
+        with pytest.raises(KeyError, match="was not found in its lookup dataset"):
+            train[0]
+
+    def test_nullable_ids_fall_back_to_dict(self) -> None:
+        # Arrow columns are homogeneously typed, so the realistic non-sortable case is a nullable
+        # id column: None among the ids gives an object-dtype array, which keeps the dict index.
+        lookup = Dataset.from_dict({"document_id": ["d1", None, "d3"], "text": ["A", "B", "C"]})
+        train = Dataset.from_dict({"document_id": ["d3", "d1"]})
+        transform = resolve_ids({"document_id": lookup})
+        index = next(iter(transform.keywords["resolutions"].values()))[1]
+        assert isinstance(index, dict)
+        train.set_transform(transform)
+        assert train[0]["document"] == "C"
+        assert train[1]["document"] == "A"
