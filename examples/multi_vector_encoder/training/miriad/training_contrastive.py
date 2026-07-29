@@ -48,7 +48,7 @@ logging.basicConfig(format="%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
-def build_ir_evaluator(split, name: str, max_queries: int | None = None, document_chunk_size: int = 8):
+def build_ir_evaluator(split, name: str, max_queries: int | None = None):
     """Corpus = deduplicated passages of the split, queries = questions, 1:1 qrels."""
     passage_to_id = {}
     corpus = {}
@@ -69,10 +69,6 @@ def build_ir_evaluator(split, name: str, max_queries: int | None = None, documen
         corpus=corpus,
         relevant_docs=relevant_docs,
         batch_size=8,
-        # The MaxSim scoring intermediate scales with queries x chunk x query tokens x document
-        # tokens. With ~1000-token passages, keep the document chunks small, and smaller still
-        # when evaluating many queries at once.
-        document_chunk_size=document_chunk_size,
         name=name,
     )
 
@@ -170,10 +166,9 @@ def main():
     )
     trainer.train()
 
-    # 7. Evaluate the final model on the complete eval and test splits. The 10x query count
-    # multiplies the scoring intermediates, hence the smaller document chunks.
-    full_eval = build_ir_evaluator(dataset["eval"], "miriad_eval_full", document_chunk_size=1)
-    test_eval = build_ir_evaluator(dataset["test"], "miriad_test", document_chunk_size=1)
+    # 7. Evaluate the final model on the complete eval and test splits.
+    full_eval = build_ir_evaluator(dataset["eval"], "miriad_eval_full")
+    test_eval = build_ir_evaluator(dataset["test"], "miriad_test")
     full_eval(model)
     test_eval(model)
 

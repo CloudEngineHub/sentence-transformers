@@ -7,8 +7,8 @@ no teacher scores or mined negatives are required, only (question, passage) pair
 
 Because MIRIAD passages average ~940 tokens, the script doubles as a long-document late-interaction
 example: the `max_length` training argument caps tokenization during training while the saved model
-keeps the backbone's full context, and the evaluation calls show how to bound MaxSim scoring memory
-via `document_chunk_size` on long corpora.
+keeps the backbone's full context, and the evaluation calls run at full passage length without any
+manual memory tuning, because MaxSim scoring packs documents under an element budget on its own.
 
 Reference results (nDCG@10, deduplicated passage corpus per split, single RTX 3090, ~9.5 hours):
 

@@ -34,13 +34,14 @@ class MultiVectorInformationRetrievalEvaluator(InformationRetrievalEvaluator):
         corpus_chunk_size (int): How many documents to encode and score per round-trip. Larger values
             mean more encoded doc embeddings live in memory at once but fewer encode-pass round-trips.
             Defaults to 50000.
-        document_chunk_size (int, optional): Per-call chunk size for the MaxSim matmul. Bounds the 4D
-            ``(batch_q, chunk, q_tokens, d_tokens)`` scoring intermediate independently of
-            ``corpus_chunk_size``. Defaults to 32. Pass ``None`` to score the whole ``corpus_chunk_size``
-            in one shot.
+        document_chunk_elements (int, optional): Element budget for the 4D
+            ``(batch_q, chunk, q_tokens, d_tokens)`` MaxSim scoring intermediate, forwarded to
+            :func:`~sentence_transformers.util.maxsim`, which packs document chunks under it,
+            adapting to the query count and document lengths. Defaults to None (maxsim's 100M-element
+            budget, at most ~400 MB, half that in bf16 / fp16). Lower it to cut evaluation memory.
         score_functions (Dict[str, Callable], optional): Override the default scoring, which resolves
-            from the model's ``similarity_fn_name`` at call time (with ``document_chunk_size``
-            applied). The chosen callable receives ``(queries, documents)`` token tensors and must
+            from the model's ``similarity_fn_name`` at call time (with ``document_chunk_elements``
+            applied if one was given). The chosen callable receives ``(queries, documents)`` token tensors and must
             return a ``(num_queries, num_documents)`` score matrix. XTR scoring is not supported here
             because it does a global top-k across the whole candidate set, which is incompatible with
             this evaluator's per-chunk corpus scoring.
@@ -107,7 +108,7 @@ class MultiVectorInformationRetrievalEvaluator(InformationRetrievalEvaluator):
         corpus: dict[str, SingleInput],
         relevant_docs: dict[str, set[str]],
         corpus_chunk_size: int = 50000,
-        document_chunk_size: int | None = 32,
+        document_chunk_elements: int | None = None,
         score_functions: dict[str, Callable[[Tensor, Tensor], Tensor]] | None = None,
         **kwargs,
     ) -> None:
@@ -132,7 +133,7 @@ class MultiVectorInformationRetrievalEvaluator(InformationRetrievalEvaluator):
                     )
         # When score_functions is None, scoring resolves from the model at call time (see __call__),
         # so models carrying a different multi-vector similarity are scored and labeled with it.
-        self.document_chunk_size = document_chunk_size
+        self.document_chunk_elements = document_chunk_elements
         super().__init__(
             queries=queries,
             corpus=corpus,
@@ -152,11 +153,12 @@ class MultiVectorInformationRetrievalEvaluator(InformationRetrievalEvaluator):
         **kwargs,
     ) -> dict[str, float]:
         # Resolve the default scoring from the model here instead of letting the parent fall back to
-        # bare model.similarity: this keeps the memory-bounding document_chunk_size wrapper.
+        # bare model.similarity. Without an explicit document_chunk_elements, maxsim's default
+        # element budget bounds the scoring intermediate on its own.
         if self.score_functions is None:
             scoring_fn = SimilarityFunction.to_similarity_fn(model.similarity_fn_name)
-            if self.document_chunk_size is not None:
-                scoring_fn = partial(scoring_fn, document_chunk_size=self.document_chunk_size)
+            if self.document_chunk_elements is not None:
+                scoring_fn = partial(scoring_fn, document_chunk_elements=self.document_chunk_elements)
             self.score_functions = {model.similarity_fn_name: scoring_fn}
             self.score_function_names = [model.similarity_fn_name]
             self._append_csv_headers(self.score_function_names)

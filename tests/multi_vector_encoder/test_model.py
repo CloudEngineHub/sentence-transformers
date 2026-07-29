@@ -1066,18 +1066,17 @@ def test_maxsim_pairwise_padded_tensor_without_mask_excludes_zero_rows() -> None
 
 
 def test_maxsim_document_chunking_matches_unchunked() -> None:
-    """``maxsim(document_chunk_size=N)`` chunks the document-axis einsum to bound the 4D scoring
-    intermediate, but must return the same scores as the unchunked path. Covers chunk sizes that
-    divide and don't divide the document count, plus one larger than it (which takes the unchunked
-    branch via the ``document_chunk_size >= b.size(0)`` guard).
+    """``maxsim(document_chunk_elements=N)`` chunks the document-axis einsum to bound the 4D scoring
+    intermediate, but must return the same scores as the single-chunk path. Covers budgets that
+    split the corpus at several granularities, plus one large enough for the single-chunk branch.
     """
     g = torch.Generator().manual_seed(0)
     queries = [torch.randn(n, 8, generator=g) for n in (3, 5)]
     documents = [torch.randn(n, 8, generator=g) for n in (2, 6, 4, 7, 3)]  # 5 documents
     full = maxsim(queries, documents)
-    for chunk in (1, 2, 3, 4, 10):
-        chunked = maxsim(queries, documents, document_chunk_size=chunk)
-        assert torch.allclose(chunked, full, atol=1e-5), f"document_chunk_size={chunk} diverged from unchunked"
+    for budget in (1, 100, 300, 10**12):
+        chunked = maxsim(queries, documents, document_chunk_elements=budget)
+        assert torch.allclose(chunked, full, atol=1e-5), f"budget={budget} diverged from single-chunk"
 
 
 def test_colbert_scoring_callable_query_major() -> None:

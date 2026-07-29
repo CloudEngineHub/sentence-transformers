@@ -198,12 +198,42 @@ def pairwise_euclidean_sim(a: list | np.ndarray | Tensor, b: list | np.ndarray |
     return -torch.sqrt(torch.sum((a - b) ** 2, dim=-1)).to_dense()
 
 
+# Element budget for the (batch_a, chunk, q_tokens, d_tokens) scoring intermediate when
+# document_chunk_elements is not given: 100M elements allocates at most ~400 MB (fp32, half in bf16).
+_MAXSIM_CHUNK_ELEMENT_BUDGET = 100_000_000
+
+
+def _document_chunk_ranges(
+    document_widths: list[int], num_queries: int, query_tokens: int, element_budget: int
+) -> list[tuple[int, int]]:
+    """Greedily pack documents into ``(start, end)`` chunks whose padded scoring intermediate of
+    ``num_queries * query_tokens * chunk_width * chunk_size`` elements stays under ``element_budget``,
+    with a floor of one document per chunk. The cost uses each chunk's local max width, matching the
+    per-chunk padding in :func:`maxsim`, so one long outlier document only sizes its own chunk.
+    """
+    per_document_token = num_queries * query_tokens
+    ranges: list[tuple[int, int]] = []
+    start = 0
+    width = 0
+    for index, document_width in enumerate(document_widths):
+        candidate_width = max(width, document_width)
+        count = index - start + 1
+        if count > 1 and per_document_token * candidate_width * count > element_budget:
+            ranges.append((start, index))
+            start = index
+            width = document_width
+        else:
+            width = candidate_width
+    ranges.append((start, len(document_widths)))
+    return ranges
+
+
 def maxsim(
     a: list | np.ndarray | Tensor,
     b: list | np.ndarray | Tensor,
     a_mask: Tensor | None = None,
     b_mask: Tensor | None = None,
-    document_chunk_size: int | None = None,
+    document_chunk_elements: int | None = None,
 ) -> Tensor:
     """
     Computes the MaxSim (late-interaction) score between two collections of multi-vector embeddings.
@@ -223,11 +253,13 @@ def maxsim(
             Tokens with a 0 / False entry are excluded from the sum. Defaults to None (use all tokens).
         b_mask (Tensor, optional): Boolean or float mask for document tokens, shape ``(batch_b, num_doc_tokens)``.
             Tokens with a 0 / False entry are excluded from the max. Defaults to None (use all tokens).
-        document_chunk_size (int, optional): If set, iterate the einsum + max-reduction over document
-            chunks of this size along the ``b`` axis. Keeps the full ``(a, b, s, t)`` 4D intermediate
-            from being materialized at once, and pads ragged documents per chunk, bounding the padded
-            tensor by the chunk's own longest document. Useful for evaluation against large corpora.
-            Defaults to None (single einsum over the full ``b`` axis).
+        document_chunk_elements (int, optional): Element budget for the 4D
+            ``(batch_a, chunk, q_tokens, d_tokens)`` scoring intermediate. Documents are greedily
+            packed into chunks (padded per chunk, so a long outlier only sizes its own chunk) whose
+            intermediate stays under the budget, with a floor of one document per chunk. Defaults to
+            None, which applies a 100M-element budget (at most ~400 MB, half that in bf16 / fp16). With very large
+            query batches that floor can still be big: shard queries externally if a single document
+            exceeds memory.
 
     Returns:
         Tensor: Matrix with ``res[i][j]`` = MaxSim(a[i], b[j]), shape ``(batch_a, batch_b)``.
@@ -235,7 +267,14 @@ def maxsim(
     a, a_mask_padded = _pad_multi_vector_inputs(a, a_mask)
 
     num_documents = len(b)
-    if document_chunk_size is None or document_chunk_size >= num_documents:
+    budget = document_chunk_elements if document_chunk_elements is not None else _MAXSIM_CHUNK_ELEMENT_BUDGET
+    if isinstance(b, list):
+        document_widths = [len(document) for document in b]
+    else:
+        document_widths = [b.shape[1]] * num_documents
+    ranges = _document_chunk_ranges(document_widths, a.shape[0], a.shape[1], budget)
+
+    if len(ranges) <= 1:
         b, b_mask_padded = _pad_multi_vector_inputs(b, b_mask)
         reduced = _maxsim_reduce_documents(a, b, b_mask_padded)
         # Query tokens are reduced with sum, so masked tokens simply contribute 0.
@@ -244,8 +283,7 @@ def maxsim(
         return reduced.sum(dim=-1)
 
     score_chunks = []
-    for d_start in range(0, num_documents, document_chunk_size):
-        d_end = d_start + document_chunk_size
+    for d_start, d_end in ranges:
         # Padding upfront instead would let one long outlier document size the full
         # (num_documents, max_len, dim) tensor: multi-GB of mostly padding on large ragged corpora.
         chunk_mask = b_mask[d_start:d_end] if b_mask is not None else None
@@ -274,7 +312,7 @@ def _maxsim_reduce_documents(a: Tensor, b: Tensor, b_mask: Tensor | None) -> Ten
     # instead (matching xtr_scores). Parity tests pass against PyLate because real tokens dominate the
     # max in practice, but the dtype-min approach is the more correct one and the one we keep.
     if b_mask is not None:
-        scores = scores.masked_fill(~b_mask.bool().unsqueeze(0).unsqueeze(2), torch.finfo(scores.dtype).min)
+        scores.masked_fill_(~b_mask.bool().unsqueeze(0).unsqueeze(2), torch.finfo(scores.dtype).min)
     return scores.max(dim=-1).values
 
 

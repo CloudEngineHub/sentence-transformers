@@ -32,9 +32,11 @@ class MultiVectorNanoBEIREvaluator(NanoBEIREvaluator):
         corpus_chunk_size (int): How many documents to encode + score per round-trip. Larger values
             mean more encoded doc embeddings live in memory at once but fewer encode-pass round-trips.
             Defaults to 50000.
-        document_chunk_size (int, optional): Per-call chunk size for the MaxSim matmul. Bounds the 4D
-            ``(batch_q, chunk, q_tokens, d_tokens)`` scoring intermediate independently of
-            ``corpus_chunk_size``. Defaults to 32. Pass ``None`` to disable inner chunking.
+        document_chunk_elements (int, optional): Element budget for the 4D
+            ``(batch_q, chunk, q_tokens, d_tokens)`` MaxSim scoring intermediate, forwarded to
+            :func:`~sentence_transformers.util.maxsim`, which packs document chunks under it,
+            adapting to the query count and document lengths. Defaults to None (maxsim's 100M-element
+            budget, at most ~400 MB, half that in bf16 / fp16). Lower it to cut evaluation memory.
         mrr_at_k (List[int]): k-values for MRR. Defaults to ``[10]``.
         ndcg_at_k (List[int]): k-values for NDCG. Defaults to ``[10]``.
         accuracy_at_k (List[int]): k-values for accuracy. Defaults to ``[1, 3, 5, 10]``.
@@ -81,7 +83,7 @@ class MultiVectorNanoBEIREvaluator(NanoBEIREvaluator):
         self,
         *args,
         corpus_chunk_size: int = 50000,
-        document_chunk_size: int | None = 32,
+        document_chunk_elements: int | None = None,
         **kwargs,
     ) -> None:
         if kwargs.get("truncate_dim") is not None:
@@ -94,7 +96,7 @@ class MultiVectorNanoBEIREvaluator(NanoBEIREvaluator):
         # construct per-subset IR evaluators, and that needs the extra kwargs.
         self._ir_extra_kwargs: dict[str, Any] = {
             "corpus_chunk_size": corpus_chunk_size,
-            "document_chunk_size": document_chunk_size,
+            "document_chunk_elements": document_chunk_elements,
         }
         super().__init__(*args, **kwargs)
 

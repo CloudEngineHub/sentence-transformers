@@ -7,6 +7,7 @@ import torch
 
 from sentence_transformers.sparse_encoder import SparseEncoder
 from sentence_transformers.util.similarity import (
+    _document_chunk_ranges,
     cos_sim,
     dot_score,
     euclidean_sim,
@@ -385,9 +386,10 @@ def test_maxsim_document_chunking_matches_unchunked() -> None:
     b_mask[:, 0] = True
 
     unchunked = maxsim(a, b, a_mask=a_mask, b_mask=b_mask)
-    for chunk_size in (1, 4, 13, 50):
-        chunked = maxsim(a, b, a_mask=a_mask, b_mask=b_mask, document_chunk_size=chunk_size)
-        assert torch.allclose(unchunked, chunked, atol=1e-6), f"chunk_size={chunk_size}"
+    # Budgets picked to yield roughly 1, 4, and 13 documents per chunk (per-document cost 5*9*11).
+    for budget in (1, 2000, 6500, 10**12):
+        chunked = maxsim(a, b, a_mask=a_mask, b_mask=b_mask, document_chunk_elements=budget)
+        assert torch.allclose(unchunked, chunked, atol=1e-6), f"budget={budget}"
 
 
 def test_maxsim_list_documents_chunking_pads_per_chunk() -> None:
@@ -400,9 +402,10 @@ def test_maxsim_list_documents_chunking_pads_per_chunk() -> None:
     b = [torch.nn.functional.normalize(torch.randn(length, 8, generator=generator), p=2, dim=-1) for length in lengths]
 
     unchunked = maxsim(a, b)
-    for chunk_size in (1, 2, 4):
-        chunked = maxsim(a, b, document_chunk_size=chunk_size)
-        assert torch.allclose(unchunked, chunked, atol=1e-6), f"chunk_size={chunk_size}"
+    # Budgets small enough to split the ragged corpus into several chunks (per-document cost 3*6*width).
+    for budget in (1, 400, 1200):
+        chunked = maxsim(a, b, document_chunk_elements=budget)
+        assert torch.allclose(unchunked, chunked, atol=1e-6), f"budget={budget}"
 
     # A caller-provided mask spans the global width and gets truncated to each chunk's local width.
     b_mask = torch.zeros(len(lengths), max(lengths), dtype=torch.bool)
@@ -410,9 +413,9 @@ def test_maxsim_list_documents_chunking_pads_per_chunk() -> None:
         b_mask[row, :length] = True
     b_mask[1, 20:] = False
     unchunked = maxsim(a, b, b_mask=b_mask)
-    for chunk_size in (1, 2, 4):
-        chunked = maxsim(a, b, b_mask=b_mask, document_chunk_size=chunk_size)
-        assert torch.allclose(unchunked, chunked, atol=1e-6), f"chunk_size={chunk_size}"
+    for budget in (1, 400, 1200):
+        chunked = maxsim(a, b, b_mask=b_mask, document_chunk_elements=budget)
+        assert torch.allclose(unchunked, chunked, atol=1e-6), f"budget={budget}"
 
 
 def test_maxsim_integer_embeddings_upcast() -> None:
@@ -439,3 +442,63 @@ def test_maxsim_integer_embeddings_upcast() -> None:
     pairwise_padded = maxsim_pairwise(queries_padded, documents_padded)
     assert pairwise_padded.dtype == torch.float32
     assert torch.allclose(pairwise_padded, torch.diagonal(expected))
+
+
+def test_document_chunk_ranges_budget_packing() -> None:
+    """Greedy packing keeps each chunk's num_queries * query_tokens * width * count under the
+    budget, isolates a long outlier in its own chunk, and never emits an empty chunk."""
+    # per_document_token = 2 * 8 = 16. Budget 256 allows width * count <= 16.
+    ranges = _document_chunk_ranges([4, 4, 100, 4], num_queries=2, query_tokens=8, element_budget=256)
+    assert ranges == [(0, 2), (2, 3), (3, 4)]
+
+    # A huge budget packs everything into one chunk, the unchunked-equivalent case.
+    assert _document_chunk_ranges([4, 4, 100, 4], 2, 8, 10**12) == [(0, 4)]
+
+    # The one-document floor: a single document over budget still gets a chunk.
+    assert _document_chunk_ranges([1000], 2, 8, 256) == [(0, 1)]
+
+    # Uniform widths degrade to fixed-size-style chunks: each 2-document chunk costs exactly 200.
+    assert _document_chunk_ranges([10] * 6, 1, 10, 200) == [(0, 2), (2, 4), (4, 6)]
+
+
+def test_maxsim_element_budget_matches_single_chunk() -> None:
+    """A tiny element budget (many chunks, outlier isolated) must score identically to a huge
+    budget (one chunk), for ragged lists, with a caller mask, and for pre-padded tensors."""
+    generator = torch.Generator().manual_seed(13)
+    queries = [torch.randn(4, 8, generator=generator), torch.randn(6, 8, generator=generator)]
+    lengths = [3, 40, 5, 9, 2, 12]
+    documents = [torch.randn(length, 8, generator=generator) for length in lengths]
+
+    single_chunk = maxsim(queries, documents, document_chunk_elements=10**12)
+    tiny_budget = maxsim(queries, documents, document_chunk_elements=1)
+    assert torch.allclose(single_chunk, tiny_budget, atol=1e-6)
+    default_budget = maxsim(queries, documents)
+    assert torch.allclose(single_chunk, default_budget, atol=1e-6)
+
+    b_mask = torch.zeros(len(lengths), max(lengths), dtype=torch.bool)
+    for row, length in enumerate(lengths):
+        b_mask[row, :length] = True
+    b_mask[1, 20:] = False
+    masked_single = maxsim(queries, documents, b_mask=b_mask, document_chunk_elements=10**12)
+    masked_tiny = maxsim(queries, documents, b_mask=b_mask, document_chunk_elements=1)
+    assert torch.allclose(masked_single, masked_tiny, atol=1e-6)
+
+    documents_padded = torch.nn.utils.rnn.pad_sequence(documents, batch_first=True)
+    padded_single = maxsim(queries, documents_padded, b_mask=b_mask, document_chunk_elements=10**12)
+    padded_tiny = maxsim(queries, documents_padded, b_mask=b_mask, document_chunk_elements=1)
+    assert torch.allclose(padded_single, padded_tiny, atol=1e-6)
+    assert torch.allclose(masked_single, padded_single, atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    "convert",
+    [lambda rows: rows, lambda rows: np.array(rows, dtype=np.float32), torch.tensor],
+    ids=["list", "numpy", "torch"],
+)
+def test_maxsim_ragged_list_entry_types(convert) -> None:
+    """Ragged list entries may be plain nested lists, not only arrays or tensors. Measuring their
+    widths for the element budget must not assume a .shape attribute."""
+    queries = [[[1.0, 0.0], [0.0, 1.0]]]
+    documents = [[[0.8, 0.6]], [[0.1, 0.2], [0.3, 0.4]]]
+    scores = maxsim(queries, [convert(document) for document in documents])
+    assert torch.allclose(scores, torch.tensor([[1.4, 0.7]]))
