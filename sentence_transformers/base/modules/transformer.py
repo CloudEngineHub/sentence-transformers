@@ -626,9 +626,12 @@ _NON_MODEL_FEATURE_KEYS = frozenset(
     {
         # Sentence Transformers' own bookkeeping.
         "modality",
+        "num_images_per_sample",
+        "num_videos_per_sample",
         "prompt_length",
         "query_expansion_positions",
-        # Tokenizer extras from return_* flags (return_offsets_mapping, etc.), never forward inputs.
+        "task",
+        # Tokenizer extras from return_* flags (return_offsets_mapping, etc.), not forward inputs.
         "offset_mapping",
         "overflow_to_sample_mapping",
         "special_tokens_mask",
@@ -851,11 +854,13 @@ class Transformer(InputModule):
 
             if isinstance(forward_model, PeftModel):
                 forward_model = forward_model.get_base_model()
-        # ``None`` = forward accepts ``**kwargs`` (pass all but ST bookkeeping). Set = declared params plus safety net.
+        # ``None`` = forward accepts ``**kwargs`` (pass all but undeclared ST bookkeeping).
+        # Set = declared params plus safety net.
         forward_signature = inspect.signature(forward_model.forward)
+        self._declared_forward_params = set(forward_signature.parameters)
         self.model_forward_params: set[str] | None = None
         if not any(p.kind is inspect.Parameter.VAR_KEYWORD for p in forward_signature.parameters.values()):
-            self.model_forward_params = set(forward_signature.parameters) | _FORWARD_SAFETY_NET_KEYS
+            self.model_forward_params = self._declared_forward_params | _FORWARD_SAFETY_NET_KEYS
 
         if max_seq_length is not None and "model_max_length" not in processor_kwargs:
             processor_kwargs["model_max_length"] = max_seq_length
@@ -1565,9 +1570,12 @@ class Transformer(InputModule):
 
         if method_name == "forward":
             if self.model_forward_params is None:
-                # forward accepts **kwargs: pass everything except ST's own bookkeeping keys.
+                # forward accepts **kwargs: drop ST's own bookkeeping, unless the forward names it and
+                # so wants to condition on it (e.g. a custom model with task adapters keyed on ``task``).
                 filtered_kwargs = {
-                    key: value for key, value in all_kwargs.items() if key not in _NON_MODEL_FEATURE_KEYS
+                    key: value
+                    for key, value in all_kwargs.items()
+                    if key not in _NON_MODEL_FEATURE_KEYS or key in self._declared_forward_params
                 }
             else:
                 filtered_kwargs = {key: value for key, value in all_kwargs.items() if key in self.model_forward_params}

@@ -840,8 +840,11 @@ class TestForward:
         features.update(
             {
                 "modality": "text",
+                "num_images_per_sample": torch.zeros(1, dtype=torch.long),
+                "num_videos_per_sample": torch.zeros(1, dtype=torch.long),
                 "prompt_length": 1,
                 "query_expansion_positions": torch.zeros_like(features["input_ids"], dtype=torch.bool),
+                "task": "document",
                 "offset_mapping": torch.zeros(1, seq_len, 2, dtype=torch.long),
                 "overflow_to_sample_mapping": torch.zeros(1, dtype=torch.long),
                 "special_tokens_mask": torch.zeros_like(features["input_ids"]),
@@ -862,13 +865,49 @@ class TestForward:
         assert {"input_ids", "attention_mask"} <= captured.keys()
         for banned in (
             "modality",
+            "num_images_per_sample",
+            "num_videos_per_sample",
             "prompt_length",
             "query_expansion_positions",
+            "task",
             "offset_mapping",
             "overflow_to_sample_mapping",
             "special_tokens_mask",
         ):
             assert banned not in captured, f"{banned} must not be forwarded to the model"
+
+    def test_kwargs_forward_keeps_bookkeeping_keys_the_model_declares(self, monkeypatch):
+        """A custom model whose forward names a bookkeeping key wants it (e.g. task adapters keyed on
+        ``task``), so the denylist must yield to an explicit declaration even though ``**kwargs`` is
+        also present. Keys it does not declare stay blocked."""
+
+        class TaskAwareModel(torch.nn.Module):
+            def __init__(self, inner):
+                super().__init__()
+                self.inner = inner
+                self.config = inner.config
+
+            def forward(self, task=None, modality=None, **kwargs):
+                self.seen = (task, modality)
+                self.blocked = "prompt_length" in kwargs
+                return self.inner(**kwargs)
+
+        original_load = Transformer._load_model
+        monkeypatch.setattr(
+            Transformer,
+            "_load_model",
+            lambda self, *args, **kwargs: TaskAwareModel(original_load(self, *args, **kwargs)),
+        )
+        model = Transformer("sentence-transformers-testing/stsb-bert-tiny-safetensors")
+        assert model.model_forward_params is None, "declaring **kwargs must select the denylist branch"
+
+        features = batch_to_device(model.preprocess(["hello world"]), next(model.model.parameters()).device)
+        features.update({"task": "document", "prompt_length": 1})
+        with torch.no_grad():
+            model.forward(features)
+
+        assert model.model.seen == ("document", "text")
+        assert not model.model.blocked, "prompt_length is undeclared, so it stays denied"
 
     def test_allowlist_forward_filters_unknown_kwargs(self, bert_tiny_transformer, monkeypatch):
         """When forward does not accept ``**kwargs`` (``model_forward_params`` is a set), forward() drops
