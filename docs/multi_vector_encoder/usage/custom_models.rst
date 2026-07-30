@@ -64,6 +64,96 @@ To reproduce the full classic recipe, initialize the modules explicitly::
 An optional :class:`~sentence_transformers.multi_vector_encoder.modules.HierarchicalTokenPooling`
 module can be appended after ``Normalize`` to bake document token pooling into the checkpoint.
 
+What released checkpoints configure
+-----------------------------------
+
+The loadable checkpoint families all end up in the same module system, but they carry different
+knob values, and different pieces live in different places (the module count and order vary per
+family). ``print(model)`` shows the stack with every knob in the module configs, and
+``model.prompts`` holds the query / document markers::
+
+    from sentence_transformers import MultiVectorEncoder
+
+    model = MultiVectorEncoder("colbert-ir/colbertv2.0")
+    print(model)
+    # MultiVectorEncoder(
+    #   (0): Transformer({..., 'document_length': 180,
+    #                     'query_expansion': {'strategy': 'fixed', 'attend': False, 'token': None, 'length': 32}})
+    #   (1): Dense({'in_features': 768, 'out_features': 128, 'bias': False, ...})
+    #   (2): MultiVectorMask({'skiplist_words': ['!', '"', '#', ..., '}', '~'], 'keep_only_token_ids': None})
+    #   (3): Normalize({...})
+    # )
+    print(model.prompts)
+    # {'query': '[unused0] ', 'document': '[unused1] '}
+
+Native and PyLate checkpoints
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Checkpoints saved by this library ship a ``modules.json`` that defines the stack directly, so
+nothing is inferred. PyLate builds on the same schema but stored some knobs as top-level config
+fields, which are translated on load: ``query_prefix`` / ``document_prefix`` become the
+``prompts`` dict, ``do_query_expansion`` / ``attend_to_expansion_tokens`` / ``query_length`` fold
+into the Transformer's ``query_expansion`` config, and ``skiplist_words`` seeds the
+:class:`~sentence_transformers.multi_vector_encoder.modules.MultiVectorMask` (defaulting to
+punctuation for PyLate saves). A PyLate ``modules.json`` lists only ``[Transformer, Dense]``,
+because masking and normalization were inline in PyLate, so the scoring mask and the token-level
+Normalize are appended on load. As a concrete example, ``lightonai/GTE-ModernColBERT-v1`` loads as
+the four default modules with prompts ``"[Q] "`` / ``"[D] "``, no query expansion (LightOn disables
+it), a query length cap of 48, a document length cap of 300, and a punctuation skiplist.
+
+Stanford-NLP ColBERT checkpoints
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Stanford-NLP ColBERT checkpoints like `colbert-ir/colbertv2.0 <https://huggingface.co/colbert-ir/colbertv2.0>`_ are
+detected via the ``HF_ColBERT`` architecture marker in ``config.json``. The projection weight is
+stored inline at the repo root (``linear.weight``) and becomes the token-level ``Dense`` module,
+and ``artifact.metadata`` supplies the recipe: ``query_token_id`` / ``doc_token_id`` become the
+prompts (``"[unused0] "`` / ``"[unused1] "`` by default), ``doc_maxlen`` becomes
+``document_length``, ``query_maxlen`` and ``attend_to_mask_tokens`` become a
+``{"strategy": "fixed", ...}`` query expansion (Stanford-NLP ColBERT always ``[MASK]``-expands
+queries), and ``mask_punctuation`` seeds the skiplist. ``colbert-ir/colbertv2.0`` loads exactly as
+the inspection snippet above shows: queries processed at exactly 32 tokens (the ``fixed`` strategy
+both pads shorter queries with non-attending ``[MASK]`` tokens and truncates longer ones),
+documents truncated at 180 tokens, and punctuation skipped during document scoring.
+
+Transformers-native retrievers (ColPali family)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``*ForRetrieval`` architectures (ColPali, ColQwen2, ColModernVBert) like `vidore/colpali-v1.3-hf <https://huggingface.co/vidore/colpali-v1.3-hf>`_ load as just
+``[Transformer, MultiVectorMask]``: the projection, the L2 normalization, and the zeroing of
+padded positions all live inside the transformers model, and the processor bakes in the query
+prefix, the query augmentation buffer, and the visual prompt. There are no recipe knobs to
+replicate by hand: to get something like ColPali, load the ``ForRetrieval`` checkpoint and
+fine-tune it (see the `multimodal training examples <../training/examples.html>`_). Text inputs are
+always rendered as queries by the processor, and image documents flow through the same
+``encode_document`` path. To filter document embeddings down to image-patch tokens only (as the
+ColPali heatmap example does), set the mask module's ``keep_only_token_ids`` to ``model.processor.image_token_id``
+or ``[model.processor.tokenizer.convert_tokens_to_ids(model.processor.image_token)]``.
+
+Saving and sharing
+------------------
+
+``save_pretrained`` writes the native format regardless of what was loaded: converted Stanford-NLP
+and PyLate checkpoints save as regular Sentence Transformers checkpoints (``modules.json`` plus a
+config per module), with the prompts in ``config_sentence_transformers.json`` and the length /
+expansion / skiplist knobs in the module configs. The conversion is one-time, so loading the save
+afterwards repeats no translation.
+
+A worked example that bakes document token pooling into the shipped model::
+
+    from sentence_transformers import MultiVectorEncoder
+    from sentence_transformers.multi_vector_encoder.modules import HierarchicalTokenPooling
+
+    model = MultiVectorEncoder("colbert-ir/colbertv2.0")
+    model.append(HierarchicalTokenPooling(pool_factor=2))
+
+    model.save_pretrained("colbertv2-pooled")
+    # or share it on the Hugging Face Hub:
+    model.push_to_hub("username/colbertv2-pooled")
+
+Every consumer of the saved checkpoint now receives pooled document embeddings (queries stay
+unpooled), with the pooling stored as a fifth entry in ``modules.json``.
+
 Extra per-token features
 ------------------------
 

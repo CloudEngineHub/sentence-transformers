@@ -42,7 +42,9 @@ def main() -> None:
     # Restrict the document mask to image-patch tokens so the doc embedding lines up 1:1 with
     # the n_patches grid (no text-prefix tokens to filter out via image_mask later).
     mask_module = next(m for m in model if isinstance(m, MultiVectorMask))
-    mask_module.keep_only_token_ids = [model.processor.image_token_id]
+    # Via the tokenizer: PaliGemma processors expose ``image_token_id``, ColQwen2Processor does not.
+    processor = model.processor
+    mask_module.keep_only_token_ids = [processor.tokenizer.convert_tokens_to_ids(processor.image_token)]
 
     image_url = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/blog/ettin-reranker/mteb_ndcg10_embeddinggemma-300m.png"
     image = load_image(image_url)
