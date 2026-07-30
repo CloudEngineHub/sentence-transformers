@@ -13,7 +13,6 @@ from sentence_transformers.multi_vector_encoder.scoring import colbert_scores
 from sentence_transformers.util import (
     all_gather_padded,
     get_rank,
-    get_world_size,
     stack_padded_token_embeddings,
 )
 
@@ -155,14 +154,11 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
         if self.gather_across_devices:
             labels = labels + get_rank() * batch_size * N
 
-        loss = F.cross_entropy(
+        return F.cross_entropy(
             scores * self.scale,
             labels,
             reduction="mean" if self.size_average else "sum",
         )
-        if self.gather_across_devices:
-            loss = loss * get_world_size()
-        return loss
 
     @property
     def citation(self) -> str:

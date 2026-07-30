@@ -23,7 +23,6 @@ from sentence_transformers.util import (
     all_gather_padded,
     cat_padded_token_embeddings,
     get_rank,
-    get_world_size,
     stack_padded_token_embeddings,
 )
 
@@ -205,8 +204,6 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
             # Average inside the graph: dividing the detached sum after backward would leave gradients scaled by batch_size.
             if self.size_average:
                 loss_mb = loss_mb / batch_size
-            if self.gather_across_devices:
-                loss_mb = loss_mb * get_world_size()
             if with_backward:
                 loss_mb.backward()
                 loss_mb = loss_mb.detach()
