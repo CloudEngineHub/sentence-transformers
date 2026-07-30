@@ -695,18 +695,21 @@ def test_encode_precision_with_convert_to_tensor_returns_tensors(model: MultiVec
     assert all(isinstance(emb, torch.Tensor) and emb.dtype == torch.int8 for emb in embeddings)
 
 
-def test_conversion_keeps_prompts_from_sparse_save(tmp_path) -> None:
-    """Converting a SparseEncoder (or CrossEncoder) save parses its config first, so saved prompts
-    survive the conversion like they do for SentenceTransformer saves."""
+def test_conversion_ignores_prompts_from_sparse_save(tmp_path) -> None:
+    """Converting a SparseEncoder (or CrossEncoder) save rebuilds the default MVE modules, so the
+    source's prompts and default_prompt_name are not inherited. SentenceTransformer-format saves
+    (including PyLate) instead reuse the saved modules and do keep prompts."""
     from sentence_transformers import SparseEncoder
 
     sparse = SparseEncoder("sparse-encoder-testing/splade-bert-tiny-nq")
     sparse.prompts = {"query": "find: ", "document": "text: "}
+    sparse.default_prompt_name = "query"
     sparse.save_pretrained(str(tmp_path))
 
     model = MultiVectorEncoder(str(tmp_path))
-    assert model.prompts.get("query") == "find: "
-    assert model.prompts.get("document") == "text: "
+    assert model.prompts == {"query": "", "document": ""}
+    assert model.default_prompt_name is None
+    assert model.similarity_fn_name == "maxsim"
 
 
 def test_pylate_marked_conversion_defaults_punctuation_skiplist(tmp_path) -> None:
@@ -728,6 +731,10 @@ def test_pylate_marked_conversion_defaults_punctuation_skiplist(tmp_path) -> Non
     model = MultiVectorEncoder(str(tmp_path))
     mask = next(module for module in model if isinstance(module, MultiVectorMask))
     assert mask.skiplist_words == list(string.punctuation)
+    # The prefixes are promoted into prompts (the SentenceTransformer-format branch keeps parsing
+    # the source config, unlike conversions from other model types).
+    assert model.prompts.get("query") == "[Q] "
+    assert model.prompts.get("document") == "[D] "
 
 
 def test_xtr_scores_clamps_topk_to_token_pool() -> None:

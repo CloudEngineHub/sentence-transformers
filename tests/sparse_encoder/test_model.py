@@ -915,16 +915,38 @@ def test_parse_model_config_ignores_multi_vector_similarity(splade_bert_tiny_mod
         model._similarity_fn_name = original
 
 
-def test_conversion_keeps_prompts_from_multi_vector_save(tmp_path) -> None:
-    """Converting a save of another model type parses its config first, so saved prompts survive.
-    The source's "maxsim" similarity is unsupported here and falls back to the default."""
+def test_conversion_ignores_source_prompts_and_similarity(tmp_path) -> None:
+    """Converting a MultiVectorEncoder save rebuilds this family's default modules, so the source's
+    prompts, default_prompt_name and similarity_fn_name are not inherited (they would silently apply
+    to every encode call and persist on save). SentenceTransformer saves are the exception: their
+    modules are reused, see SparseEncoder._load_converted_modules."""
     from sentence_transformers import MultiVectorEncoder
 
     source = MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
     source.prompts = {"query": "find: ", "document": "text: "}
+    source.default_prompt_name = "query"
     source.save_pretrained(str(tmp_path))
 
     model = SparseEncoder(str(tmp_path))
-    assert model.prompts.get("query") == "find: "
-    assert model.prompts.get("document") == "text: "
-    assert model.similarity_fn_name != "maxsim"
+    assert model.prompts == {"query": "", "document": ""}
+    assert model.default_prompt_name is None
+    assert model.similarity_fn_name == "dot"
+
+
+def test_conversion_from_sentence_transformer_keeps_prompts_and_similarity(tmp_path) -> None:
+    """The SentenceTransformer branch reuses the saved modules and appends a SparseAutoEncoder
+    (CSR), so the source's prompts and similarity stay meaningful for the kept backbone and survive.
+    Carrying the dense base's "cosine" over is what the CSR recipe wants, rather than the "dot" that
+    a SPLADE-shaped SparseEncoder defaults to."""
+    from sentence_transformers import SentenceTransformer
+
+    source = SentenceTransformer(
+        "sentence-transformers-testing/stsb-bert-tiny-safetensors",
+        prompts={"query": "Represent this sentence: "},
+    )
+    source.save_pretrained(str(tmp_path))
+
+    model = SparseEncoder(str(tmp_path))
+    assert isinstance(model[-1], SparseAutoEncoder)
+    assert model.prompts["query"] == "Represent this sentence: "
+    assert model.similarity_fn_name == "cosine"

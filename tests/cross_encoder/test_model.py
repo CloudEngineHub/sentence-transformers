@@ -908,6 +908,24 @@ Judge whether the Document meets the requirements based on the Query and the Ins
     assert scores == pytest.approx(expected_scores, abs=1e-4)
 
 
+def test_conversion_ignores_source_prompts_and_default_prompt_name(tmp_path: Path) -> None:
+    """Converting a SentenceTransformer save appends a fresh classification head, so the source's
+    embedding prompts and default_prompt_name are not inherited: they would otherwise silently be
+    prepended to every predict call."""
+    from sentence_transformers import SentenceTransformer
+
+    source = SentenceTransformer(
+        "sentence-transformers-testing/stsb-bert-tiny-safetensors",
+        prompts={"query": "Represent this sentence: "},
+        default_prompt_name="query",
+    )
+    source.save_pretrained(str(tmp_path))
+
+    model = CrossEncoder(str(tmp_path))
+    assert model.prompts == {}
+    assert model.default_prompt_name is None
+
+
 def test_predict_routes_through_module_call(reranker_bert_tiny_model: CrossEncoder) -> None:
     """predict() must run the forward pass via __call__ so that model.compile() applies to inference."""
     model = reranker_bert_tiny_model

@@ -1408,16 +1408,44 @@ def test_parse_model_config_ignores_multi_vector_similarity(stsb_bert_tiny_model
         model._similarity_fn_name = original
 
 
-def test_conversion_keeps_prompts_from_multi_vector_save(tmp_path) -> None:
-    """Converting a save of another model type parses its config first, so saved prompts survive.
-    The source's "maxsim" similarity is unsupported here and falls back to the default."""
-    from sentence_transformers import MultiVectorEncoder
+def test_conversion_ignores_source_prompts_and_default_prompt_name(tmp_path) -> None:
+    """Converting a CrossEncoder save rebuilds this family's default modules, so the source's
+    prompts and default_prompt_name no longer describe the loaded model. Inheriting them would
+    silently prepend the reranker prompt to every encode call and persist it on save."""
+    from sentence_transformers import CrossEncoder
 
-    source = MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
-    source.prompts = {"query": "find: ", "document": "text: "}
+    source = CrossEncoder(
+        "cross-encoder-testing/reranker-bert-tiny-gooaq-bce",
+        prompts={"query": "query: "},
+        default_prompt_name="query",
+    )
+    source.save_pretrained(str(tmp_path / "source"))
+
+    model = SentenceTransformer(str(tmp_path / "source"))
+    assert model.prompts == {"query": "", "document": ""}
+    assert model.default_prompt_name is None
+
+    model.save_pretrained(str(tmp_path / "resaved"))
+    reloaded = SentenceTransformer(str(tmp_path / "resaved"))
+    assert reloaded.prompts == {"query": "", "document": ""}
+    assert reloaded.default_prompt_name is None
+
+    # Explicitly passed prompts are user intent and still apply on a converted load.
+    overridden = SentenceTransformer(str(tmp_path / "source"), prompts={"query": "q: "})
+    assert overridden.prompts["query"] == "q: "
+
+
+def test_conversion_ignores_source_similarity_fn_name(tmp_path) -> None:
+    """A SparseEncoder save carries similarity_fn_name="dot", chosen for sparse embeddings. The
+    converted dense model scores with the dense default instead, unless the user pins one."""
+    from sentence_transformers import SparseEncoder
+
+    source = SparseEncoder("sparse-encoder-testing/splade-bert-tiny-nq")
+    assert source.similarity_fn_name == "dot"
     source.save_pretrained(str(tmp_path))
 
     model = SentenceTransformer(str(tmp_path))
-    assert model.prompts.get("query") == "find: "
-    assert model.prompts.get("document") == "text: "
     assert model.similarity_fn_name == "cosine"
+
+    overridden = SentenceTransformer(str(tmp_path), similarity_fn_name="dot")
+    assert overridden.similarity_fn_name == "dot"

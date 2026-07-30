@@ -1296,20 +1296,13 @@ This pull request has been automatically generated to add {self.__class__.__name
     ) -> tuple[list[nn.Module] | OrderedDict[str, nn.Module], dict[str, Any]]:
         """Load a save of a different model type by building this class's default modules on top of it.
 
-        The source's ``config_sentence_transformers.json`` (prompts etc.) is parsed first so it
-        survives the conversion (same-type loads get this via :meth:`_load_config_modules`).
+        The source's ``config_sentence_transformers.json`` is deliberately not parsed: this path
+        replaces the source's modules with this family's defaults, so its inference-time settings
+        (``prompts``, ``default_prompt_name``, ``similarity_fn_name``) no longer describe the loaded
+        model and would silently misapply, e.g. a reranker's default prompt prepended to every
+        ``encode`` call. Subclass overrides that reuse the saved modules instead (the
+        SentenceTransformer branches of SparseEncoder and MultiVectorEncoder) do keep those settings.
         """
-        config_path = load_file_path(
-            model_name_or_path,
-            "config_sentence_transformers.json",
-            token=token,
-            cache_folder=cache_folder,
-            revision=revision,
-            local_files_only=local_files_only,
-        )
-        if config_path is not None:
-            with open(config_path, encoding="utf8") as fIn:
-                self._parse_model_config(json.load(fIn))
         return self._load_default_modules(
             model_name_or_path,
             token=token,
