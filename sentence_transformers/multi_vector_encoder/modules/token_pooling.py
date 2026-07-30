@@ -164,7 +164,8 @@ def _hierarchical_pool_one(embedding: Tensor, pool_factor: int, protected_tokens
     if num_clusters >= num_to_pool:
         return embedding.to(device)
 
-    to_pool_fp32 = to_pool.float()
+    # Detach: clustering only picks assignments, gradients flow through the cluster means below.
+    to_pool_fp32 = to_pool.detach().float()
     cos_sim = torch.mm(to_pool_fp32, to_pool_fp32.t()).numpy()
     condensed = np.clip(1 - cos_sim, 0, 2)[np.triu_indices(num_to_pool, k=1)]
     linkage = hierarchy.linkage(condensed, method="ward")

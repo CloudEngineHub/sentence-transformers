@@ -12,6 +12,7 @@ from sentence_transformers.multi_vector_encoder.modules import (
     HierarchicalTokenPooling,
     LambdaTokenPooling,
 )
+from sentence_transformers.util import batch_to_device
 
 
 def _normed(shape: tuple[int, int]) -> Tensor:
@@ -293,6 +294,30 @@ class TestEncodeWithPooling:
         assert with_pooling.dim() == 3 and with_pooling.shape[0] == 2
         # Pooled output has strictly fewer tokens per doc than the un-pooled version.
         assert with_pooling.shape[1] < without.shape[1]
+
+
+class TestTrainingGradientFlow:
+    def test_forward_backward_with_pooling_in_pipeline(self) -> None:
+        # A checkpoint with baked-in pooling must remain finetunable: with grad enabled, the
+        # clustering used to raise "Can't call numpy() on Tensor that requires grad" in forward.
+        model = MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
+        model.append(HierarchicalTokenPooling(pool_factor=2))
+        model.train()
+        features = model.preprocess(
+            ["a fairly long document with plenty of distinct tokens to cluster together here"],
+            task="document",
+        )
+        features = batch_to_device(features, model.device)
+        num_tokens = features["input_ids"].shape[1]
+        out = model(features, task="document")
+        assert out["token_embeddings"].shape[1] < num_tokens, "pooling did not trigger"
+        # Row 0 is the protected passthrough and carries gradient on its own, so backward through
+        # the pooled rows only. This fails too if the cluster means are detached alongside the
+        # clustering.
+        out["token_embeddings"][:, 1:].sum().backward()
+        grads = [p.grad for p in model[0].parameters() if p.grad is not None]
+        assert grads, "no transformer parameter received a gradient"
+        assert any(g.abs().sum() > 0 for g in grads), "no gradient reached the transformer through the cluster means"
 
 
 class TestConstructorValidation:
