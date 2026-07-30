@@ -228,6 +228,22 @@ def _document_chunk_ranges(
     return ranges
 
 
+def _batch_singular_input(
+    embeddings: list | np.ndarray | Tensor, mask: Tensor | None
+) -> tuple[list | np.ndarray | Tensor, Tensor | None]:
+    # Mirror the dense family's _convert_to_batch_tensor: a bare 2D (tokens, dim) input is one
+    # multi-vector embedding (e.g. from a singular encode call), scored as a batch of one.
+    if isinstance(embeddings, np.ndarray) and embeddings.ndim == 2:
+        embeddings = np.expand_dims(embeddings, 0)
+    elif isinstance(embeddings, Tensor) and embeddings.ndim == 2:
+        embeddings = embeddings.unsqueeze(0)
+    else:
+        return embeddings, mask
+    if mask is not None and mask.ndim == 1:
+        mask = mask.unsqueeze(0)
+    return embeddings, mask
+
+
 def maxsim(
     a: list | np.ndarray | Tensor,
     b: list | np.ndarray | Tensor,
@@ -244,15 +260,19 @@ def maxsim(
 
     Args:
         a (Union[list, np.ndarray, Tensor]): Query embeddings. Either a 3D tensor of shape
-            ``(batch_a, num_query_tokens, embedding_dim)`` (pre-padded) or a list of 2D tensors of shape
-            ``(num_query_tokens_i, embedding_dim)`` (variable-length, padded internally).
+            ``(batch_a, num_query_tokens, embedding_dim)`` (pre-padded), a list of 2D tensors of shape
+            ``(num_query_tokens_i, embedding_dim)`` (variable-length, padded internally), or a single
+            2D tensor or array (one query, e.g. from a singular encode call, scored as a batch of one).
         b (Union[list, np.ndarray, Tensor]): Document embeddings. Either a 3D tensor of shape
-            ``(batch_b, num_doc_tokens, embedding_dim)`` or a list of 2D tensors of shape
-            ``(num_doc_tokens_i, embedding_dim)``.
-        a_mask (Tensor, optional): Boolean or float mask for query tokens, shape ``(batch_a, num_query_tokens)``.
-            Tokens with a 0 / False entry are excluded from the sum. Defaults to None (use all tokens).
-        b_mask (Tensor, optional): Boolean or float mask for document tokens, shape ``(batch_b, num_doc_tokens)``.
-            Tokens with a 0 / False entry are excluded from the max. Defaults to None (use all tokens).
+            ``(batch_b, num_doc_tokens, embedding_dim)``, a list of 2D tensors of shape
+            ``(num_doc_tokens_i, embedding_dim)``, or a single 2D tensor or array (one document,
+            scored as a batch of one).
+        a_mask (Tensor, optional): Boolean or float mask for query tokens, shape ``(batch_a, num_query_tokens)``,
+            or ``(num_query_tokens,)`` alongside a single 2D ``a``. Tokens with a 0 / False entry are excluded
+            from the sum. Defaults to None (use all tokens).
+        b_mask (Tensor, optional): Boolean or float mask for document tokens, shape ``(batch_b, num_doc_tokens)``,
+            or ``(num_doc_tokens,)`` alongside a single 2D ``b``. Tokens with a 0 / False entry are excluded
+            from the max. Defaults to None (use all tokens).
         document_chunk_elements (int, optional): Element budget for the 4D
             ``(batch_a, chunk, q_tokens, d_tokens)`` scoring intermediate. Documents are greedily
             packed into chunks (padded per chunk, so a long outlier only sizes its own chunk) whose
@@ -264,6 +284,8 @@ def maxsim(
     Returns:
         Tensor: Matrix with ``res[i][j]`` = MaxSim(a[i], b[j]), shape ``(batch_a, batch_b)``.
     """
+    a, a_mask = _batch_singular_input(a, a_mask)
+    b, b_mask = _batch_singular_input(b, b_mask)
     a, a_mask_padded = _pad_multi_vector_inputs(a, a_mask)
 
     num_documents = len(b)
@@ -330,19 +352,38 @@ def maxsim_pairwise(
 
     Args:
         a (Union[list, np.ndarray, Tensor]): Query embeddings. Either a 3D tensor of shape
-            ``(batch, num_query_tokens, embedding_dim)`` (pre-padded) or a list of 2D tensors with
-            shape ``(num_query_tokens_i, embedding_dim)``.
+            ``(batch, num_query_tokens, embedding_dim)`` (pre-padded), a list of 2D tensors with
+            shape ``(num_query_tokens_i, embedding_dim)``, or a single 2D tensor or array (one query,
+            e.g. from a singular encode call, scored as a batch of one).
         b (Union[list, np.ndarray, Tensor]): Document embeddings. Either a 3D tensor of shape
-            ``(batch, num_doc_tokens, embedding_dim)`` or a list of 2D tensors with shape
-            ``(num_doc_tokens_i, embedding_dim)``.
-        a_mask (Tensor, optional): Boolean or float mask for query tokens, shape ``(batch, num_query_tokens)``.
-            Tokens with a 0 / False entry are excluded from the sum. Defaults to None (use all tokens).
-        b_mask (Tensor, optional): Boolean or float mask for document tokens, shape ``(batch, num_doc_tokens)``.
-            Tokens with a 0 / False entry are excluded from the max. Defaults to None (use all tokens).
+            ``(batch, num_doc_tokens, embedding_dim)``, a list of 2D tensors with shape
+            ``(num_doc_tokens_i, embedding_dim)``, or a single 2D tensor or array (one document,
+            scored as a batch of one).
+        a_mask (Tensor, optional): Boolean or float mask for query tokens, shape ``(batch, num_query_tokens)``,
+            or ``(num_query_tokens,)`` alongside a single 2D ``a``. Tokens with a 0 / False entry are excluded
+            from the sum. Defaults to None (use all tokens).
+        b_mask (Tensor, optional): Boolean or float mask for document tokens, shape ``(batch, num_doc_tokens)``,
+            or ``(num_doc_tokens,)`` alongside a single 2D ``b``. Tokens with a 0 / False entry are excluded
+            from the max. Defaults to None (use all tokens).
 
     Returns:
         Tensor: Vector with ``res[i]`` = MaxSim(a[i], b[i]), shape ``(batch,)``.
     """
+    a, a_mask = _batch_singular_input(a, a_mask)
+    b, b_mask = _batch_singular_input(b, b_mask)
+
+    # Mirror maxsim: derive a mask from all-zero (pad) rows of pre-padded 3D input up front. The
+    # mixed list + 3D case runs the per-pair loop below, whose 2D slices keep their padding rows,
+    # and document padding must not win the max there.
+    if a_mask is None and not isinstance(a, list):
+        a = _convert_to_tensor(a)
+        if a.dim() == 3:
+            a_mask = _zero_row_mask(a)
+    if b_mask is None and not isinstance(b, list):
+        b = _convert_to_tensor(b)
+        if b.dim() == 3:
+            b_mask = _zero_row_mask(b)
+
     if isinstance(a, list) or isinstance(b, list):
         scores = []
         for i in range(len(a)):
@@ -370,11 +411,6 @@ def maxsim_pairwise(
         a = a.float()
     if not b.is_floating_point():
         b = b.float()
-    # Mirror maxsim: derive a mask from all-zero (pad) rows so pad cannot win the max.
-    if a_mask is None and a.dim() == 3:
-        a_mask = _zero_row_mask(a)
-    if b_mask is None and b.dim() == 3:
-        b_mask = _zero_row_mask(b)
     scores = torch.einsum("bsh,bth->bst", a, b)
     # Documents reduced with max (mask to dtype min so padding never wins). Queries reduced with sum (mask to 0).
     if b_mask is not None:

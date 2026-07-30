@@ -1066,6 +1066,23 @@ def test_encode_padded_tensor_stays_on_model_device(
     assert padded.device == model.device
 
 
+def test_similarity_singular_query(model: MultiVectorEncoder) -> None:
+    # Mirrors SentenceTransformer.similarity, which auto-batches a singular embedding: similarity
+    # on a singular encode output must score as a batch of one instead of crashing in einsum.
+    documents = model.encode_document(["Paris is the capital of France.", "Berlin is big."])
+    single = model.encode_query("What is the capital of France?")
+    batched = model.similarity(model.encode_query(["What is the capital of France?"]), documents)
+
+    scores = model.similarity(single, documents)
+    assert scores.shape == (1, 2)
+    assert torch.allclose(scores, batched)
+    assert model.similarity(documents, single).shape == (2, 1)
+
+    pairwise = model.similarity_pairwise(single, model.encode_document("Paris is the capital of France."))
+    assert pairwise.shape == (1,)
+    assert torch.allclose(pairwise, scores[:, 0], atol=1e-6)
+
+
 def test_similarity_function_enum_has_maxsim() -> None:
     assert SimilarityFunction.MAXSIM.value == "maxsim"
     assert SimilarityFunction.to_similarity_fn("maxsim") is maxsim
@@ -1096,27 +1113,6 @@ def test_maxsim_padded_tensor_without_mask_excludes_zero_rows() -> None:
     scores_padded = maxsim(q_list, d_padded)
     assert torch.allclose(scores_padded, scores_list), (
         f"padded-tensor scores {scores_padded.tolist()} should match list-input scores "
-        f"{scores_list.tolist()}; without the mask derivation, the zero-pad rows win the max."
-    )
-
-
-def test_maxsim_pairwise_padded_tensor_without_mask_excludes_zero_rows() -> None:
-    """maxsim_pairwise mirrors maxsim: a pre-padded 3D tensor without a mask (the output of
-    ``encode(convert_to_padded_tensor=True)`` consumed by ``model.similarity_pairwise``) derives a mask from
-    its all-zero rows so zero-pad doc tokens cannot win the max over a negative real similarity."""
-    q_list = [torch.tensor([[1.0, 0.0]])]
-    d_list = [torch.tensor([[-0.5, -0.5]])]
-
-    # Both columns as pre-padded 3D tensors (so the tensor branch, not the list branch, runs).
-    q_padded = torch.zeros(1, 2, 2)
-    q_padded[0, 0] = q_list[0][0]
-    d_padded = torch.zeros(1, 3, 2)
-    d_padded[0, 0] = d_list[0][0]
-
-    scores_list = maxsim_pairwise(q_list, d_list)
-    scores_padded = maxsim_pairwise(q_padded, d_padded)
-    assert torch.allclose(scores_padded, scores_list), (
-        f"padded-tensor pairwise scores {scores_padded.tolist()} should match list-input scores "
         f"{scores_list.tolist()}; without the mask derivation, the zero-pad rows win the max."
     )
 

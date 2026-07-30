@@ -332,16 +332,6 @@ def test_maxsim_pairwise_matches_maxsim_diagonal() -> None:
     assert torch.allclose(pairwise, torch.diagonal(full), atol=1e-5)
 
 
-def test_maxsim_pairwise_tensor_path_matches_list_path() -> None:
-    """maxsim_pairwise should give the same result for a 3D tensor and the equivalent list of 2D tensors."""
-    queries = torch.rand(2, 3, 8)
-    documents = torch.rand(2, 4, 8)
-    from_tensor = maxsim_pairwise(queries, documents)
-    from_list = maxsim_pairwise([queries[0], queries[1]], [documents[0], documents[1]])
-    assert from_tensor.shape == (2,)
-    assert torch.allclose(from_tensor, from_list, atol=1e-5)
-
-
 def test_pairwise_angle_sim_even_and_odd_sparse_embeddings(splade_bert_tiny_model: SparseEncoder) -> None:
     """Ensure pairwise_angle_sim works for even and artificially odd dims."""
 
@@ -416,6 +406,59 @@ def test_maxsim_list_documents_chunking_pads_per_chunk() -> None:
     for budget in (1, 400, 1200):
         chunked = maxsim(a, b, b_mask=b_mask, document_chunk_elements=budget)
         assert torch.allclose(unchunked, chunked, atol=1e-6), f"budget={budget}"
+
+
+def test_maxsim_singular_inputs_score_as_batch_of_one() -> None:
+    """Mirrors the dense family's similarity, where a singular (unbatched) embedding auto-batches:
+    a bare 2D (tokens, dim) input, e.g. from a singular encode call, scores as a batch of one."""
+    query = torch.randn(5, 8)
+    documents = [torch.randn(7, 8), torch.randn(3, 8)]
+    batched = maxsim([query], documents)
+
+    assert batched.shape == (1, 2)
+    assert torch.equal(maxsim(query, documents), batched)
+    assert torch.equal(maxsim(documents, query), maxsim(documents, [query]))
+    assert maxsim(query, query).shape == (1, 1)
+    # The encode() default output type for a singular input is a 2D numpy array.
+    numpy_scores = maxsim(query.numpy(), [document.numpy() for document in documents])
+    assert torch.allclose(numpy_scores, batched)
+
+
+def test_maxsim_pairwise_singular_inputs_score_as_batch_of_one() -> None:
+    """maxsim_pairwise must auto-batch singular inputs just like maxsim, so a user who reaches for
+    similarity_pairwise on singular encode outputs does not hit the einsum crash instead."""
+    query = torch.randn(5, 8)
+    document = torch.randn(7, 8)
+    batched = maxsim_pairwise([query], [document])
+
+    assert batched.shape == (1,)
+    assert torch.allclose(maxsim_pairwise(query, document), batched, atol=1e-6)
+    assert torch.allclose(maxsim_pairwise(query.numpy(), document.numpy()), batched, atol=1e-6)
+
+    a_mask = torch.tensor([1.0, 1.0, 1.0, 0.0, 0.0])
+    b_mask = torch.tensor([1, 1, 1, 1, 0, 0, 0])
+    assert torch.allclose(
+        maxsim_pairwise(query, document, a_mask=a_mask, b_mask=b_mask),
+        maxsim_pairwise([query], [document], a_mask=a_mask.unsqueeze(0), b_mask=b_mask.unsqueeze(0)),
+        atol=1e-6,
+    )
+
+
+def test_maxsim_pairwise_derives_padding_mask_from_zero_rows() -> None:
+    """Pre-padded 3D input without a mask must have its zero rows excluded from the max, both in the
+    per-pair loop (mixed list + 3D, whose 2D slices keep their padding rows) and in the tensor branch.
+    Visible with all-negative similarities, where a padding zero would beat every real token."""
+    queries = [-torch.rand(5, 4) - 0.1, -torch.rand(3, 4) - 0.1]
+    documents = [torch.rand(6, 4) + 0.1, torch.rand(2, 4) + 0.1]
+    reference = maxsim_pairwise(queries, documents)
+    assert (reference < 0).all()
+
+    padded_queries = torch.nn.utils.rnn.pad_sequence(queries, batch_first=True)
+    padded_documents = torch.nn.utils.rnn.pad_sequence(documents, batch_first=True)
+    assert torch.allclose(maxsim_pairwise(queries, padded_documents), reference, atol=1e-6)
+    assert torch.allclose(maxsim_pairwise(padded_queries, documents), reference, atol=1e-6)
+    assert torch.allclose(maxsim_pairwise(queries, padded_documents.numpy()), reference, atol=1e-6)
+    assert torch.allclose(maxsim_pairwise(padded_queries, padded_documents), reference, atol=1e-6)
 
 
 def test_maxsim_integer_embeddings_upcast() -> None:
