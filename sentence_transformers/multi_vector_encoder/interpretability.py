@@ -48,9 +48,10 @@ _MAKO_LUT = _build_mako_lut()
 def real_query_token_slice(model: MultiVectorEncoder, query: str) -> slice:
     """Return the slice into ``encode_query``'s output that selects the real content tokens.
 
-    Chat-template prefixes (e.g. ``<bos>``), suffixes (e.g. ``<|im_end|>``), and ``MultiVectorEncoder``'s
-    query-expansion tokens (``<mask>`` / ``<pad>``) wrap the actual query and carry attention-sink
-    signals that distort heatmap visualisations. Slicing them out keeps only the real tokens:
+    Chat-template prefixes (e.g. ``<bos>``), ColBERT query markers (e.g. ``[Q] ``), suffixes (e.g.
+    ``<|im_end|>``), and ``MultiVectorEncoder``'s query-expansion tokens (``<mask>`` / ``<pad>``) wrap
+    the actual query and carry attention-sink signals that distort heatmap visualisations. Slicing
+    them out keeps only the real tokens:
 
     .. code-block:: python
 
@@ -61,8 +62,11 @@ def real_query_token_slice(model: MultiVectorEncoder, query: str) -> slice:
     backbones by comparing the encoded sequences of an empty and the actual query.
     """
     transformer = cast("Transformer", model[0])
-    empty_ids = transformer.preprocess([""], task="query")["input_ids"][0].tolist()
-    query_ids = transformer.preprocess([query], task="query")["input_ids"][0].tolist()
+    # Render with the same prompt encode_query() would apply, otherwise a marker prefix like
+    # ColBERT's "[Q] " lands inside the slice and pushes the last real token out of it.
+    prompt = model.prompts.get("query")
+    empty_ids = transformer.preprocess([""], prompt=prompt, task="query")["input_ids"][0].tolist()
+    query_ids = transformer.preprocess([query], prompt=prompt, task="query")["input_ids"][0].tolist()
 
     prefix = 0
     while prefix < min(len(empty_ids), len(query_ids)) and empty_ids[prefix] == query_ids[prefix]:

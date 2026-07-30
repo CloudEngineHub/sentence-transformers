@@ -298,6 +298,28 @@ def test_get_n_patches_unknown_family_raises() -> None:
         get_n_patches(model, (640, 480))
 
 
+@pytest.mark.parametrize("expansion", [None, {"strategy": "fixed", "attend": False, "length": 32}])
+def test_real_query_token_slice_with_query_prompt(expansion: dict | None) -> None:
+    """ColBERT-style checkpoints carry their query marker in ``prompts["query"]``, which
+    ``encode_query`` applies but ``Transformer.preprocess`` does not. The slice must skip the marker
+    and still reach the last content token, not stop one short of it.
+    """
+    from sentence_transformers import MultiVectorEncoder
+    from sentence_transformers.multi_vector_encoder.interpretability import real_query_token_slice
+
+    model = MultiVectorEncoder(
+        "sentence-transformers-testing/stsb-bert-tiny-safetensors",
+        prompts={"query": "[Q] ", "document": "[D] "},
+    )
+    model[0].query_expansion = expansion
+    query = "What is the capital of France?"
+    content_ids = model.tokenizer(query, add_special_tokens=False)["input_ids"]
+
+    token_slice = real_query_token_slice(model, query)
+    output = model.encode_query([query], output_value=None)[0]
+    assert output["input_ids"][token_slice].tolist() == content_ids
+
+
 def test_real_query_token_slice_with_query_expansion() -> None:
     """Fixed-width expansion renders the empty and real query to the same padded length, so the
     naive length diff is always 0. The slice must still select the real content tokens."""

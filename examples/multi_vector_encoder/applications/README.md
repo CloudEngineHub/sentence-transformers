@@ -12,7 +12,7 @@ MultiVectorEncoder models score with the MaxSim late-interaction operator, which
 
 ## Interpretability
 
-Because MaxSim scores are sums of per-query-token maxima, a multi-vector ranking can be traced back to the exact tokens (or image patches) that produced it. [heatmap.py](../interpretability/heatmap.py) shows the standard ColPali visualization: for a query and a page image, it overlays heatmaps showing which patches contribute most to the ranking score, summed and per query token. Useful for spot-checking why a retrieval ranking surfaced (or missed) a page. The underlying utilities live in `sentence_transformers.multi_vector_encoder.interpretability`, including `maxsim_similarity_map` for the raw query-token to document-token similarity matrix of text documents.
+Because MaxSim scores are sums of per-query-token maxima, a multi-vector ranking can be traced back to the exact tokens (or image patches) that produced it. [heatmap.py](../interpretability/heatmap.py) shows the standard ColPali visualization: for a query and a page image, it overlays heatmaps showing which patches contribute most to the ranking score, summed and per query token. Useful for spot-checking why a retrieval ranking surfaced (or missed) a page. [text_similarity_map.py](../interpretability/text_similarity_map.py) is the text-only counterpart: it ranks a corpus the way semantic_search.py does, then splits the top document's score across the query tokens that earned it and prints the document with those tokens highlighted in place. The underlying utilities live in `sentence_transformers.multi_vector_encoder.interpretability`.
 
 ## Compression
 
