@@ -32,6 +32,7 @@ MODELS_TO_MAXSIM: dict[str, list[float]] = {
     "lightonai/GTE-ModernColBERT-v1": [11.25772, 11.51133, 11.34575, 11.4518],
     "lightonai/LateOn": [10.79417, 11.11042, 10.97427, 11.08107],
     "mixedbread-ai/mxbai-edge-colbert-v0-17m": [11.56932, 11.75844, 11.70989, 11.72288],
+    "lightonai/mLateOn": [11.3486, 11.5170, 11.4391, 11.4867],
 }
 
 # doc{i} is the relevant page for IMAGE_QUERIES[i], so the correct retrieval is the diagonal.
