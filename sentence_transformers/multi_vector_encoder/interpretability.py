@@ -147,7 +147,7 @@ def maxsim_similarity_map(
         normalize: rescale each per-query-token map to ``[0, 1]``.
 
     Returns:
-        Tensor of shape ``(Qt, n_rows, n_cols)``.
+        Tensor of shape ``(Qt, n_rows, n_cols)``, float32 regardless of the input dtype.
     """
     if image_mask is not None:
         image_embedding = image_embedding[image_mask.bool()]
@@ -160,7 +160,8 @@ def maxsim_similarity_map(
             "set MultiVectorMask.keep_only_token_ids to the image-patch token id during encoding."
         )
     grid = image_embedding.view(n_rows, n_cols, -1)
-    similarity_map = torch.einsum("qd,rcd->qrc", query_embedding, grid)
+    # Input-precision matmul, fp32 for the downstream heatmap sums, matching maxsim.
+    similarity_map = torch.einsum("qd,rcd->qrc", query_embedding, grid).float()
     if normalize:
         flat = similarity_map.reshape(similarity_map.shape[0], -1)
         min_vals = flat.min(dim=-1, keepdim=True).values

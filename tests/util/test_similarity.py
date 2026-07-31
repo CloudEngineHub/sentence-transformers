@@ -6,6 +6,7 @@ import sklearn
 import torch
 
 from sentence_transformers.sparse_encoder import SparseEncoder
+from sentence_transformers.util import similarity as similarity_module
 from sentence_transformers.util.similarity import (
     _document_chunk_ranges,
     cos_sim,
@@ -531,6 +532,154 @@ def test_maxsim_element_budget_matches_single_chunk() -> None:
     padded_tiny = maxsim(queries, documents_padded, b_mask=b_mask, document_chunk_elements=1)
     assert torch.allclose(padded_single, padded_tiny, atol=1e-6)
     assert torch.allclose(masked_single, padded_single, atol=1e-6)
+
+
+def test_maxsim_half_precision_accumulates_in_float32() -> None:
+    """Summing the query-token maxima in bf16 collapses documents onto the coarse bf16 grid: the
+    accumulation runs in float32 and the scores stay float32."""
+    generator = torch.Generator().manual_seed(17)
+    queries = torch.nn.functional.normalize(torch.randn(2, 32, 16, generator=generator), p=2, dim=-1)
+    base = torch.randn(1, 20, 16, generator=generator)
+    documents = torch.nn.functional.normalize(base + 0.02 * torch.randn(64, 20, 16, generator=generator), p=2, dim=-1)
+    queries_bf16 = queries.bfloat16()
+    documents_bf16 = documents.bfloat16()
+    reference = maxsim(queries_bf16.float(), documents_bf16.float())
+
+    scores = maxsim(queries_bf16, documents_bf16)
+    assert scores.dtype == torch.float32
+    # Inputs are identical, so only the bf16 einsum separates the two scorings.
+    assert torch.allclose(scores, reference, atol=0.05)
+    # Far more distinct scores than the bf16 grid can represent for these clustered documents.
+    assert scores[0].unique().numel() > 2 * scores[0].bfloat16().unique().numel()
+
+    chunked = maxsim(queries_bf16, documents_bf16, document_chunk_elements=1)
+    assert chunked.dtype == torch.float32
+    assert torch.equal(chunked, scores)
+
+
+def test_maxsim_pairwise_half_precision_accumulates_in_float32() -> None:
+    """Both maxsim_pairwise paths (tensor and per-pair list) accumulate in float32."""
+    generator = torch.Generator().manual_seed(19)
+    queries = torch.nn.functional.normalize(torch.randn(6, 32, 16, generator=generator), p=2, dim=-1).bfloat16()
+    documents = torch.nn.functional.normalize(torch.randn(6, 20, 16, generator=generator), p=2, dim=-1).bfloat16()
+    reference = maxsim_pairwise(queries.float(), documents.float())
+
+    tensor_scores = maxsim_pairwise(queries, documents)
+    assert tensor_scores.dtype == torch.float32
+    assert torch.allclose(tensor_scores, reference, atol=0.05)
+
+    list_scores = maxsim_pairwise(list(queries.unbind(0)), list(documents.unbind(0)))
+    assert list_scores.dtype == torch.float32
+    assert torch.allclose(list_scores, reference, atol=0.05)
+
+
+def test_maxsim_fully_masked_document_scores_sentinel(caplog) -> None:
+    """A document without any unmasked token scores the -1e9 sentinel instead of overflowing to
+    -inf, other documents stay unaffected, and a one-shot warning names the likely causes."""
+    generator = torch.Generator().manual_seed(23)
+    queries = torch.randn(2, 4, 8, generator=generator)
+    documents = torch.randn(3, 5, 8, generator=generator)
+    b_mask = torch.ones(3, 5, dtype=torch.bool)
+    b_mask[1] = False
+
+    # warning_once caches globally, clear so this test does not depend on run order.
+    similarity_module.logger.warning_once.cache_clear()
+    with caplog.at_level("WARNING"):
+        scores = maxsim(queries, documents, b_mask=b_mask)
+    assert torch.isfinite(scores).all()
+    assert (scores[:, 1] == -1e9).all()
+    assert scores[:, [0, 2]].abs().max() < 100
+    assert any("keep_only_token_ids" in record.message for record in caplog.records)
+
+    # A zero-width document in a ragged list is the other reachable form of the same emptiness.
+    list_scores = maxsim([queries[0]], [documents[0], torch.zeros(0, 8)])
+    assert torch.isfinite(list_scores).all()
+    assert list_scores[0, 1] == -1e9
+    assert list_scores[0, 0].abs() < 100
+
+    # The chunked path applies the same sentinel per chunk.
+    chunked = maxsim(queries, documents, b_mask=b_mask, document_chunk_elements=1)
+    assert torch.equal(chunked, scores)
+
+
+def test_maxsim_pairwise_empty_document_scores_sentinel(caplog) -> None:
+    """Empty pair entries (zero-width, all-masked, tensor mask row) score the sentinel on both
+    pairwise paths, other pairs stay finite, and it warns."""
+    generator = torch.Generator().manual_seed(29)
+    queries = [torch.randn(3, 8, generator=generator), torch.randn(2, 8, generator=generator)]
+    documents = [torch.randn(4, 8, generator=generator), torch.zeros(0, 8)]
+
+    similarity_module.logger.warning_once.cache_clear()
+    with caplog.at_level("WARNING"):
+        scores = maxsim_pairwise(queries, documents)
+    assert torch.isfinite(scores).all()
+    assert scores[1] == -1e9
+    assert scores[0].abs() < 100
+    assert any("skiplist_words" in record.message for record in caplog.records)
+
+    # A full-width document whose mask is all False is the other way a list entry reads as empty.
+    masked_out = maxsim_pairwise(
+        queries,
+        [documents[0], torch.randn(4, 8, generator=generator)],
+        b_mask=[torch.ones(4, dtype=torch.bool), torch.zeros(4, dtype=torch.bool)],
+    )
+    assert masked_out[1] == -1e9
+    assert masked_out[0].abs() < 100
+
+    queries_padded = torch.nn.utils.rnn.pad_sequence(queries, batch_first=True)
+    documents_tensor = torch.randn(2, 4, 8, generator=generator)
+    b_mask = torch.ones(2, 4, dtype=torch.bool)
+    b_mask[1] = False
+    tensor_scores = maxsim_pairwise(queries_padded, documents_tensor, b_mask=b_mask)
+    assert torch.isfinite(tensor_scores).all()
+    assert tensor_scores[1] == -1e9
+    assert tensor_scores[0].abs() < 100
+
+
+def test_empty_document_score_survives_the_losses_that_consume_it() -> None:
+    """The sentinel must rank last AND stay finite through loss arithmetic (scaling, softmax,
+    squared margins), which the float32 minimum did not."""
+    generator = torch.Generator().manual_seed(31)
+    queries = torch.randn(3, 4, 8, generator=generator)
+    documents = torch.randn(3, 5, 8, generator=generator)
+    b_mask = torch.ones(3, 5, dtype=torch.bool)
+    b_mask[1] = False
+    scores = maxsim(queries, documents, b_mask=b_mask)
+
+    for scale in (1.0, 20.0):
+        for targets in ([1, 0, 2], [1, 1, 2], [1, 1, 1]):
+            loss = torch.nn.functional.cross_entropy(scores * scale, torch.tensor(targets))
+            assert torch.isfinite(loss), f"{scale=} {targets=}"
+
+    # MarginMSE shape: the empty document is the negative, so its sentinel reaches the loss through a
+    # subtraction that masked_fill's zeroed gradient does not shield the positive from.
+    queries = torch.randn(2, 4, 8, generator=generator, requires_grad=True)
+    positives = torch.randn(2, 5, 8, generator=generator, requires_grad=True)
+    negatives = torch.randn(2, 5, 8, generator=generator, requires_grad=True)
+    margins = maxsim_pairwise(queries, positives) - maxsim_pairwise(
+        queries, negatives, b_mask=torch.zeros(2, 5, dtype=torch.bool)
+    )
+    loss = torch.nn.functional.mse_loss(margins, torch.tensor([1.0, 1.0]))
+    loss.backward()
+    assert torch.isfinite(loss)
+    assert torch.isfinite(queries.grad).all()
+    assert torch.isfinite(positives.grad).all()
+
+
+def test_maxsim_takes_no_data_dependent_branch() -> None:
+    """The unconditional sentinel fill keeps maxsim fullgraph-capturable (and free of per-call
+    device syncs), which compiling the scoring hot path relies on."""
+    queries = torch.nn.functional.normalize(torch.randn(2, 4, 8), dim=-1)
+    documents = torch.nn.functional.normalize(torch.randn(3, 5, 8), dim=-1)
+    b_mask = torch.ones(3, 5, dtype=torch.bool)
+    b_mask[1] = False
+
+    # backend="eager" keeps this about graph capture. Lowering maxsim is a separate concern: inductor
+    # rejects the in-place masked_fill_ against a broadcast mask in _maxsim_reduce_documents.
+    compiled = torch.compile(maxsim, fullgraph=True, backend="eager")
+    scores = compiled(queries, documents, b_mask=b_mask)
+    assert torch.allclose(scores, maxsim(queries, documents, b_mask=b_mask))
+    assert (scores[:, 1] == -1e9).all()
 
 
 @pytest.mark.parametrize(

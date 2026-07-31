@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
+from sentence_transformers.util.similarity import _fill_empty_document_scores
 from sentence_transformers.util.tensor import _convert_to_tensor
 
 
@@ -19,7 +20,8 @@ def xtr_scores(
     For each query token, the top-k matches are selected globally across all in-batch document tokens
     (simulating retrieval from an index). Returns the full ``(Q, Q*N)`` cross-product score matrix with
     query-major ordering: ``scores[i, j*N + k]`` is query ``i`` against query ``j``'s ``k``-th document.
-    The positive for query ``i`` sits at column ``i*N``.
+    The positive for query ``i`` sits at column ``i*N``. As in :func:`~sentence_transformers.util.similarity.maxsim`,
+    the matmul runs in the input dtype and the per-query-token accumulation and returned scores are float32.
 
     Args:
         queries_embeddings: ``(Q, q_tokens, dim)`` query embeddings.
@@ -73,14 +75,21 @@ def xtr_scores(
     clubbed = scores.flatten(2, 3)
     top_values, indices = clubbed.topk(min(k, clubbed.shape[-1]), dim=-1, sorted=False)
     masked = torch.zeros_like(clubbed).scatter_(-1, indices, top_values)
-    topk_scores_max = masked.view(Qb, Qt, Db, Dt).max(dim=-1).values
+    # fp32 accumulation like maxsim: summing per-token maxima in half precision collapses the
+    # score grid (PyLate instead sums in the input dtype and casts the result).
+    topk_scores_max = masked.view(Qb, Qt, Db, Dt).max(dim=-1).values.float()
 
     if queries_mask is not None:
         topk_scores_max = topk_scores_max * queries_mask.unsqueeze(-1)
 
     scores_sum = topk_scores_max.sum(dim=1)
     Z = topk_scores_max.gt(0).float().sum(dim=1).clamp_(min=1e-3)
-    return (scores_sum / Z).float()
+    scores = scores_sum / Z
+    if docs_mask_flat is not None:
+        # Every token of a fully masked document sits at the dtype minimum: the sum overflows to -inf
+        # when k spans all tokens, and the scatter flattens it to a retrievable-looking 0 below that.
+        scores = _fill_empty_document_scores(scores, ~docs_mask_flat.bool().any(dim=-1))
+    return scores
 
 
 def xtr_kd_scores(
@@ -121,7 +130,7 @@ def xtr_scores_pairwise(
 ) -> torch.Tensor:
     """Pairwise XTR scoring: compute the XTR score for matched ``(query_i, document_i)`` pairs.
 
-    Returns a 1D tensor of length ``batch_size``.
+    Returns a float32 1D tensor of length ``batch_size``.
     """
     # Reshape to (Q, N=1, Dt, H), score with xtr_kd_scores, take the diagonal.
     documents_embeddings = _convert_to_tensor(documents_embeddings)

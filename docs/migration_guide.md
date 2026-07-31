@@ -72,6 +72,7 @@ and the processor formats queries and image documents.
 
 ```{eval-rst}
 - :class:`~sentence_transformers.sentence_transformer.evaluation.TripletEvaluator` and :class:`~sentence_transformers.sparse_encoder.evaluation.SparseTripletEvaluator` now embed anchors with ``encode_query`` and positives / negatives with ``encode_document``, instead of ``encode`` for all three. This is a no-op for models without ``query`` / ``document`` prompts, but asymmetric models will report different triplet accuracy than in v5.x because their prompts are now applied.
+- :func:`~sentence_transformers.util.similarity.maxsim` and :func:`~sentence_transformers.util.similarity.maxsim_pairwise` (and with them :class:`~sentence_transformers.MultiVectorEncoder`'s ``similarity`` and ``similarity_pairwise``) always return ``float32`` scores, where half precision inputs previously returned half precision scores. MaxSim sums over query tokens, so scores reach magnitudes where the bfloat16 grid is 0.125 wide, coarse enough to collapse thousands of documents onto a handful of tied scores. The 4-D scoring intermediate stays in the input dtype, so this does not change peak memory.
 ```
 
 ## Migrating from v5.x to v5.4+

@@ -202,6 +202,9 @@ def pairwise_euclidean_sim(a: list | np.ndarray | Tensor, b: list | np.ndarray |
 # document_chunk_elements is not given: 100M elements allocates at most ~400 MB (fp32, half in bf16).
 _MAXSIM_CHUNK_ELEMENT_BUDGET = 100_000_000
 
+# Ranks below any real MaxSim score, and unlike the float32 minimum it survives a loss scaling and squaring it.
+_EMPTY_DOCUMENT_SCORE = -1e9
+
 
 def _document_chunk_ranges(
     document_widths: list[int], num_queries: int, query_tokens: int, element_budget: int
@@ -282,7 +285,8 @@ def maxsim(
             exceeds memory.
 
     Returns:
-        Tensor: Matrix with ``res[i][j]`` = MaxSim(a[i], b[j]), shape ``(batch_a, batch_b)``.
+        Tensor: Matrix with ``res[i][j]`` = MaxSim(a[i], b[j]), shape ``(batch_a, batch_b)``, always
+        float32 (half precision inputs are accumulated in float32 to keep nearby scores distinct).
     """
     a, a_mask = _batch_singular_input(a, a_mask)
     b, b_mask = _batch_singular_input(b, b_mask)
@@ -302,7 +306,10 @@ def maxsim(
         # Query tokens are reduced with sum, so masked tokens simply contribute 0.
         if a_mask_padded is not None:
             reduced = reduced * a_mask_padded.unsqueeze(1)
-        return reduced.sum(dim=-1)
+        scores = reduced.sum(dim=-1)
+        if b_mask_padded is not None:
+            scores = _fill_empty_document_scores(scores, ~b_mask_padded.bool().any(dim=-1))
+        return scores
 
     score_chunks = []
     for d_start, d_end in ranges:
@@ -318,15 +325,24 @@ def maxsim(
         # rebuild a full-corpus-width intermediate and defeat the chunking.
         if a_mask_padded is not None:
             reduced = reduced * a_mask_padded.unsqueeze(1)
-        score_chunks.append(reduced.sum(dim=-1))
+        chunk_scores = reduced.sum(dim=-1)
+        if chunk_b_mask is not None:
+            chunk_scores = _fill_empty_document_scores(chunk_scores, ~chunk_b_mask.bool().any(dim=-1))
+        score_chunks.append(chunk_scores)
     return torch.cat(score_chunks, dim=1)
 
 
 def _maxsim_reduce_documents(a: Tensor, b: Tensor, b_mask: Tensor | None) -> Tensor:
     """Compute the ``(a_batch, b_batch, q_tokens)`` per-query-token max over document tokens for one
-    document chunk. Pulled out of :func:`maxsim` so the chunked and unchunked paths share the
-    reduction kernel verbatim.
+    document chunk, returned in float32. Pulled out of :func:`maxsim` so the chunked and unchunked
+    paths share the reduction kernel verbatim. The float32 cast makes the downstream query-token sum
+    accumulate in float32: MaxSim scores reach O(num_query_tokens) magnitudes where the bf16 grid is
+    0.125 wide, coarse enough to collapse thousands of documents onto a handful of distinct scores.
     """
+    if b.shape[1] == 0:
+        # No document token to take the max over. The empty-document sentinel in the caller supplies
+        # the final score for these cells.
+        return torch.zeros(a.shape[0], b.shape[0], a.shape[1], dtype=torch.float32, device=a.device)
     scores = torch.einsum("ash,bth->abst", a, b)
     # Document tokens are reduced with max, so masked (padding) tokens are sent to the dtype minimum:
     # multiplying by 0 would let a padding token win the max over a genuinely negative similarity.
@@ -335,7 +351,25 @@ def _maxsim_reduce_documents(a: Tensor, b: Tensor, b_mask: Tensor | None) -> Ten
     # max in practice, but the dtype-min approach is the more correct one and the one we keep.
     if b_mask is not None:
         scores.masked_fill_(~b_mask.bool().unsqueeze(0).unsqueeze(2), torch.finfo(scores.dtype).min)
-    return scores.max(dim=-1).values
+    return scores.max(dim=-1).values.float()
+
+
+def _fill_empty_document_scores(scores: Tensor, empty: Tensor) -> Tensor:
+    """Overwrite the scores of documents flagged in ``empty`` (no unmasked token), whose every token
+    sat at the masked-fill dtype minimum and whose sum therefore poisons downstream losses.
+
+    The fill is unconditional: reading ``empty`` on the host costs a device synchronization per
+    scoring call and is a data-dependent branch that :func:`torch.compile` cannot capture, so only
+    the warning reads it, and only where that is free.
+    """
+    if not torch.compiler.is_compiling() and empty.device.type == "cpu" and empty.any():
+        logger.warning_once(
+            "Encountered documents without any scoreable token during multi-vector similarity scoring, "
+            "e.g. because MultiVectorMask (via keep_only_token_ids or skiplist_words) masked out every "
+            "token, or because a document embedding has zero token vectors. These documents score "
+            f"{_EMPTY_DOCUMENT_SCORE:.0e}, ranking them below every real document."
+        )
+    return scores.masked_fill(empty, _EMPTY_DOCUMENT_SCORE)
 
 
 def maxsim_pairwise(
@@ -367,7 +401,8 @@ def maxsim_pairwise(
             from the max. Defaults to None (use all tokens).
 
     Returns:
-        Tensor: Vector with ``res[i]`` = MaxSim(a[i], b[i]), shape ``(batch,)``.
+        Tensor: Vector with ``res[i]`` = MaxSim(a[i], b[i]), shape ``(batch,)``, always float32
+        (half precision inputs are accumulated in float32 to keep nearby scores distinct).
     """
     a, a_mask = _batch_singular_input(a, a_mask)
     b, b_mask = _batch_singular_input(b, b_mask)
@@ -385,7 +420,8 @@ def maxsim_pairwise(
             b_mask = _zero_row_mask(b)
 
     if isinstance(a, list) or isinstance(b, list):
-        scores = []
+        pair_scores = []
+        empty_documents = []
         for i in range(len(a)):
             qi = _convert_to_tensor(a[i])
             di = _convert_to_tensor(b[i])
@@ -394,16 +430,25 @@ def maxsim_pairwise(
                 qi = qi.float()
             if not di.is_floating_point():
                 di = di.float()
+            di_mask = _convert_to_tensor(b_mask[i]).bool() if b_mask is not None else None
+            is_empty = len(di) == 0 or (di_mask is not None and not di_mask.any())
+            empty_documents.append(is_empty)
+            if is_empty:
+                # Placeholder, overwritten with the empty-document sentinel below.
+                pair_scores.append(torch.zeros((), dtype=torch.float32, device=qi.device))
+                continue
             score = torch.einsum("sh,th->st", qi, di)
-            if b_mask is not None:
-                score = score.masked_fill(
-                    ~_convert_to_tensor(b_mask[i]).bool().unsqueeze(0), torch.finfo(score.dtype).min
-                )
-            maxed = score.max(dim=-1).values
+            if di_mask is not None:
+                score = score.masked_fill(~di_mask.unsqueeze(0), torch.finfo(score.dtype).min)
+            # Query-token maxima in float32, so the sum does not accumulate on the coarse bf16 grid.
+            maxed = score.max(dim=-1).values.float()
             if a_mask is not None:
                 maxed = maxed * _convert_to_tensor(a_mask[i])
-            scores.append(maxed.sum())
-        return torch.stack(scores, dim=0)
+            pair_scores.append(maxed.sum())
+        scores = torch.stack(pair_scores, dim=0)
+        if any(empty_documents):
+            scores = _fill_empty_document_scores(scores, torch.tensor(empty_documents, device=scores.device))
+        return scores
 
     a = _convert_to_tensor(a)
     b = _convert_to_tensor(b)
@@ -411,14 +456,22 @@ def maxsim_pairwise(
         a = a.float()
     if not b.is_floating_point():
         b = b.float()
+    if b.shape[1] == 0:
+        # Every document is zero-width, nothing to take the max over.
+        empty = torch.ones(b.shape[0], dtype=torch.bool, device=b.device)
+        return _fill_empty_document_scores(torch.zeros(b.shape[0], dtype=torch.float32, device=b.device), empty)
     scores = torch.einsum("bsh,bth->bst", a, b)
     # Documents reduced with max (mask to dtype min so padding never wins). Queries reduced with sum (mask to 0).
     if b_mask is not None:
         scores = scores.masked_fill(~b_mask.bool().unsqueeze(1), torch.finfo(scores.dtype).min)
-    scores = scores.max(dim=-1).values
+    # Query-token maxima in float32, so the sum does not accumulate on the coarse bf16 grid.
+    scores = scores.max(dim=-1).values.float()
     if a_mask is not None:
         scores = scores * a_mask
-    return scores.sum(dim=-1)
+    scores = scores.sum(dim=-1)
+    if b_mask is not None:
+        scores = _fill_empty_document_scores(scores, ~b_mask.bool().any(dim=-1))
+    return scores
 
 
 def _zero_row_mask(padded: Tensor) -> Tensor:
@@ -432,8 +485,9 @@ def _zero_row_mask(padded: Tensor) -> Tensor:
     Boundary: a real all-zero row is indistinguishable from padding here and is masked out of
     scoring. L2-normalized pipelines cannot produce one, but token pooling can (a cluster mean of
     antipodal vectors cancels to zero). Masking such a row scores it as 0 rather than dtype-min
-    garbage, the preferable failure mode. Any future module that intentionally emits zero rows
-    (e.g. learned pruning) must pass explicit masks instead of relying on this detection.
+    garbage, the preferable failure mode. A document whose rows are *all* zero instead reads as empty
+    and takes the :func:`_fill_empty_document_scores` sentinel. Any future module that intentionally
+    emits zero rows (e.g. learned pruning) must pass explicit masks instead of relying on this detection.
     """
     return padded.any(dim=-1).to(padded.dtype)
 

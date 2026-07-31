@@ -748,6 +748,60 @@ def test_xtr_scores_clamps_topk_to_token_pool() -> None:
     assert torch.isfinite(scores).all()
 
 
+def test_colbert_scores_keep_float32_through_delegation() -> None:
+    """The losses' default score_metric surface must keep maxsim's float32 scores, also under a
+    future fused reimplementation. Also pins the KD block-diagonal relation to the full matrix."""
+    from sentence_transformers.multi_vector_encoder.scoring import colbert_kd_scores, colbert_scores
+
+    torch.manual_seed(0)
+    queries = torch.nn.functional.normalize(torch.randn(2, 5, 16), dim=-1).bfloat16()
+    documents = torch.nn.functional.normalize(torch.randn(2, 3, 7, 16), dim=-1).bfloat16()
+
+    scores = colbert_scores(queries, documents)
+    kd_scores = colbert_kd_scores(queries, documents)
+    assert scores.dtype == torch.float32 and scores.shape == (2, 6)
+    assert kd_scores.dtype == torch.float32 and kd_scores.shape == (2, 3)
+    # KD scores are each query's own document group, the query-major block diagonal of the matrix.
+    assert torch.allclose(kd_scores[0], scores[0, 0:3])
+    assert torch.allclose(kd_scores[1], scores[1, 3:6])
+
+
+def test_xtr_scores_half_precision_accumulates_in_float32() -> None:
+    """XTR's own query-token sum accumulates in float32: an output cast alone cannot restore the
+    resolution a bf16 sum loses."""
+    from sentence_transformers.multi_vector_encoder.scoring import xtr_scores
+
+    torch.manual_seed(0)
+    queries = torch.nn.functional.normalize(torch.randn(1, 32, 64), dim=-1)
+    documents = torch.nn.functional.normalize(torch.randn(1, 500, 12, 64), dim=-1)
+
+    half_scores = xtr_scores(queries.bfloat16(), documents.bfloat16())
+    full_arithmetic = xtr_scores(queries.bfloat16().float(), documents.bfloat16().float())
+    assert half_scores.dtype == torch.float32
+    # Same quantized values, so only the bf16 matmul itself may differ.
+    assert torch.allclose(half_scores, full_arithmetic, atol=2e-2)
+    assert half_scores[0].unique().numel() > 400
+
+
+def test_xtr_scores_fully_masked_document_scores_sentinel() -> None:
+    """An empty document surfaces differently per ``k`` (-inf when the top-k spans the pool, a
+    retrievable-looking 0 below that): both regimes take the -1e9 sentinel."""
+    from sentence_transformers.multi_vector_encoder.scoring import xtr_scores
+
+    generator = torch.Generator().manual_seed(23)
+    queries = torch.nn.functional.normalize(torch.randn(2, 4, 8, generator=generator), dim=-1)
+    documents = torch.nn.functional.normalize(torch.randn(2, 2, 6, 8, generator=generator), dim=-1)
+    documents_mask = torch.ones(2, 2, 6, dtype=torch.bool)
+    documents_mask[0, 1] = False
+
+    # k=256 spans the 24-token pool, k=4 does not.
+    for k in (256, 4):
+        scores = xtr_scores(queries, documents, documents_mask=documents_mask, k=k)
+        assert torch.isfinite(scores).all()
+        assert (scores[:, 1] == -1e9).all()
+        assert scores[:, [0, 2, 3]].abs().max() < 100
+
+
 def test_ir_evaluator_rejects_compiled_xtr_scoring() -> None:
     """The XTR rejection must not be evaded by torch.compile, which the XTR docstring itself
     recommends for the hot path."""
