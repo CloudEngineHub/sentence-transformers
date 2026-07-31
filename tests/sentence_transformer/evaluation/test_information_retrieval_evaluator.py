@@ -108,6 +108,41 @@ def test_simple(test_data, stsb_bert_tiny_model: SentenceTransformer, tmp_path: 
     assert set(results.keys()) == set(expected_keys)
 
 
+def test_metrics_are_independent_of_corpus_chunk_size(stsb_bert_tiny_model: SentenceTransformer):
+    """Duplicate documents produce exact score ties: breaking them by corpus_id keeps every metric
+    identical across corpus_chunk_size values."""
+    queries = {"q0": "What is the capital of France?", "q1": "Who painted the Mona Lisa?"}
+    corpus = {f"d{idx:02d}": "Paris is the capital of France." for idx in range(20)}
+    relevant_docs = {"q0": {"d00", "d15"}, "q1": {"d07"}}
+
+    results_per_chunk_size = {}
+    # Every effective chunk length (4, 8, 20, 20) is a multiple of batch_size 4, so every encode
+    # batch holds 4 identical texts and the duplicates tie bit-exactly in every chunking (larger
+    # batches vary in the last ulp).
+    for corpus_chunk_size in [4, 8, 20, 50]:
+        ir_evaluator = InformationRetrievalEvaluator(
+            queries=queries,
+            corpus=corpus,
+            relevant_docs=relevant_docs,
+            name="chunked",
+            corpus_chunk_size=corpus_chunk_size,
+            batch_size=4,
+            accuracy_at_k=[1, 5],
+            precision_recall_at_k=[1, 5],
+            mrr_at_k=[10],
+            ndcg_at_k=[10],
+            map_at_k=[10],
+            write_csv=False,
+        )
+        results_per_chunk_size[corpus_chunk_size] = ir_evaluator(stsb_bert_tiny_model)
+
+    baseline = results_per_chunk_size[50]
+    for chunk_size, results in results_per_chunk_size.items():
+        assert results == baseline, f"corpus_chunk_size={chunk_size} changed the metrics"
+    # All 20 documents tie, so ranks follow ascending corpus_id: only q0 has its d00 at rank 1.
+    assert baseline["chunked_cosine_accuracy@1"] == 0.5
+
+
 def test_metrics(test_data, mock_model, tmp_path: Path):
     queries, corpus, relevant_docs = test_data
 
