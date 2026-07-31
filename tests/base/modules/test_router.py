@@ -255,6 +255,28 @@ def test_router_encode(static_embedding):
         model.encode(doc_texts)
 
 
+def test_router_task_not_forwarded_to_auto_model(stsb_bert_tiny_model, monkeypatch):
+    """Router.preprocess stamps features["task"] for routing, but that bookkeeping key must not
+    reach the wrapped auto_model.forward (ONNX backends warn on every such unexpected kwarg)."""
+    transformer, pooling = stsb_bert_tiny_model[0], stsb_bert_tiny_model[1]
+    router = Router({"query": [transformer, pooling], "document": [transformer, pooling]})
+    model = SentenceTransformer(modules=[router])
+
+    captured = {}
+    original_forward = transformer.model.forward
+
+    def spy(**kwargs):
+        captured.update(kwargs)
+        return original_forward(**kwargs)
+
+    monkeypatch.setattr(transformer.model, "forward", spy)
+    embeddings = model.encode_query(["What is the capital of France?"])
+
+    assert embeddings.shape == (1, model.get_embedding_dimension())
+    assert "input_ids" in captured
+    assert "task" not in captured
+
+
 def test_router_is_alias_for_asym():
     """Test that Router is an alias for Asym."""
 
