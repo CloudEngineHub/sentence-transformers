@@ -322,6 +322,96 @@ def test_distillation_evaluator_spearman_skips_constant_queries(model: MultiVect
     assert results["distill_constant_spearman"] == 0.0
 
 
+def test_distillation_evaluator_temperature_matches_training_loss(model: MultiVectorEncoder) -> None:
+    """The nested-path KL equals what MultiVectorDistillKLDivLoss reports for the same queries,
+    documents and teacher scores, at the evaluator's own ``temperature``."""
+    from sentence_transformers.multi_vector_encoder.losses import MultiVectorDistillKLDivLoss
+
+    queries = ["What is the capital of France?", "Who painted the Mona Lisa?"]
+    documents = [
+        ["Paris is the capital of France.", "Berlin is the capital of Germany."],
+        ["Leonardo da Vinci painted the Mona Lisa.", "Van Gogh painted The Starry Night."],
+    ]
+    teacher_scores = torch.tensor([[5.0, 1.0], [4.5, 0.5]])
+    temperature = 0.25
+
+    def tokenize(texts: list[str], task: str) -> dict[str, torch.Tensor]:
+        features = model.tokenize(texts, task=task)
+        return {
+            key: value.to(model.device) if isinstance(value, torch.Tensor) else value
+            for key, value in features.items()
+        }
+
+    kl_by_temperature = {}
+    for value in (1.0, temperature):
+        # Rebuilt per iteration: the loss forward rewrites the attention masks of its features.
+        features = [tokenize(queries, "query")]
+        features += [tokenize([row[way] for row in documents], "document") for way in range(len(documents[0]))]
+        loss = MultiVectorDistillKLDivLoss(model=model, temperature=value)
+        with torch.no_grad():
+            expected = loss(features, teacher_scores.to(model.device)).item()
+
+        evaluator = MultiVectorDistillationEvaluator(
+            queries=queries,
+            documents=documents,
+            scores=teacher_scores.tolist(),
+            temperature=value,
+            name="distill_temp",
+            write_csv=False,
+        )
+        kl_by_temperature[value] = evaluator(model)["distill_temp_kl_divergence"]
+        assert kl_by_temperature[value] == pytest.approx(expected, rel=1e-3)
+    assert kl_by_temperature[1.0] != pytest.approx(kl_by_temperature[temperature], rel=1e-3)
+
+
+def test_distillation_evaluator_flat_kl_is_full_sum(model: MultiVectorEncoder) -> None:
+    """The flat-path KL is the full divergence between the two dataset-level distributions, not
+    divided by the number of pairs, so duplicating every pair leaves it unchanged."""
+    queries = ["What is the capital of France?", "Who painted the Mona Lisa?"]
+    documents = ["Paris is the capital of France.", "Leonardo da Vinci painted the Mona Lisa."]
+    scores = [0.0, 10.0]
+
+    query_embeddings = model.encode_query(queries, convert_to_tensor=True)
+    doc_embeddings = model.encode_document(documents, convert_to_tensor=True)
+    student_scores = model.similarity_pairwise(query_embeddings, doc_embeddings).cpu()
+    expected = torch.nn.functional.kl_div(
+        torch.log_softmax(student_scores, dim=-1),
+        torch.log_softmax(torch.tensor(scores), dim=-1),
+        reduction="sum",
+        log_target=True,
+    ).item()
+    assert expected > 0.1
+
+    for repeats in (1, 2):
+        evaluator = MultiVectorDistillationEvaluator(
+            queries=queries * repeats,
+            documents=documents * repeats,
+            scores=scores * repeats,
+            name="distill_flat",
+            write_csv=False,
+        )
+        assert evaluator(model)["distill_flat_kl_divergence"] == pytest.approx(expected, rel=1e-4)
+
+
+def test_distillation_evaluator_config_dict() -> None:
+    # Only non-default values reach the model card, and normalize_scores is inert on the flat path.
+    default = MultiVectorDistillationEvaluator(queries=["q"], documents=[["d1", "d2"]], scores=[[1.0, 0.0]])
+    assert default.get_config_dict() == {}
+
+    nested = MultiVectorDistillationEvaluator(
+        queries=["q"], documents=[["d1", "d2"]], scores=[[1.0, 0.0]], temperature=0.25, normalize_scores=False
+    )
+    assert nested.get_config_dict() == {"temperature": 0.25, "normalize_scores": False}
+
+    flat = MultiVectorDistillationEvaluator(queries=["q"], documents=["d"], scores=[1.0], normalize_scores=False)
+    assert flat.get_config_dict() == {}
+
+
+def test_distillation_evaluator_rejects_non_positive_temperature() -> None:
+    with pytest.raises(ValueError, match="temperature"):
+        MultiVectorDistillationEvaluator(queries=["q"], documents=["d"], scores=[1.0], temperature=0.0)
+
+
 def test_distillation_evaluator_rejects_mismatched_nested_shapes() -> None:
     # Ragged candidate lists are rejected up front instead of failing deep inside encode.
     with pytest.raises(ValueError, match="same length"):

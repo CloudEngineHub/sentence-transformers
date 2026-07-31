@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import logging
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import torch
 from scipy.stats import spearmanr
@@ -26,12 +26,15 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
       :class:`~sentence_transformers.multi_vector_encoder.losses.MultiVectorDistillKLDivLoss` and
       PyLate): ``documents`` is a list of N-way candidate lists per query and ``scores`` the matching
       2-D teacher scores. Both metrics are computed per query, so they track the training loss: the KL
-      divergence over each query's own candidate set (with the same optional min-max normalization as
-      the loss) and the Spearman as the mean of the per-query rank correlations.
+      divergence over each query's own candidate set (with the same optional min-max normalization and
+      ``temperature`` handling as the loss, averaged over queries, so with the loss's temperature the
+      reported KL matches the training loss at its default ``size_average=True``) and the Spearman as
+      the mean of the per-query rank correlations.
     - **Flat pairs**: one document per query with 1-D scores. A per-query distribution or ranking is
-      undefined here, so the KL softmaxes over the whole dataset as a single distribution (not
-      comparable to the per-query KL or to PyLate) and the Spearman is one global correlation over
-      all pairs.
+      undefined here, so the KL softmaxes over the whole dataset as a single distribution and reports
+      the full divergence (a sum over pairs, not divided by their number, and not comparable to the
+      per-query KL or to PyLate). ``temperature`` divides the scores the same way as on the per-query
+      path. The Spearman is one global correlation over all pairs.
 
     Reported metrics:
 
@@ -53,6 +56,11 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
             candidate sets.
         normalize_scores: Min-max normalize the student scores per query before the softmax, matching
             ``MultiVectorDistillKLDivLoss``. Only used for per-query candidate sets. Defaults to True.
+        temperature: Temperature dividing the teacher scores and (normalized) student scores before
+            the softmax, with the KL scaled by ``temperature ** 2``, exactly as in
+            ``MultiVectorDistillKLDivLoss``. Set it to the training loss's temperature so the
+            per-query KL matches the training loss at its default ``size_average=True``. Must be > 0.
+            Defaults to 1.0.
         name: Optional run name appended to CSV filenames.
         batch_size: Batch size for encoding.
         show_progress_bar: Whether to show a progress bar.
@@ -65,6 +73,7 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
         documents: list[SingleInput] | list[list[SingleInput]],
         scores: list[float] | list[list[float]] | torch.Tensor,
         normalize_scores: bool = True,
+        temperature: float = 1.0,
         name: str = "",
         batch_size: int = 16,
         show_progress_bar: bool = False,
@@ -97,7 +106,10 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
                     f"With one document per query, scores must be 1-D, got shape {tuple(self.scores.shape)}. "
                     "Pass documents as a list of per-query candidate lists to use 2-D scores."
                 )
+        if temperature <= 0:
+            raise ValueError(f"temperature must be > 0, got {temperature}.")
         self.normalize_scores = normalize_scores
+        self.temperature = temperature
         self.name = name
         self.batch_size = batch_size
         self.show_progress_bar = show_progress_bar
@@ -147,8 +159,8 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
                 max_scores = student_logits.max(dim=1, keepdim=True).values
                 min_scores = student_logits.min(dim=1, keepdim=True).values
                 student_logits = (student_logits - min_scores) / (max_scores - min_scores + 1e-8)
-            teacher_log_probs = torch.log_softmax(self.scores, dim=-1)
-            student_log_probs = torch.log_softmax(student_logits, dim=-1)
+            teacher_log_probs = torch.log_softmax(self.scores / self.temperature, dim=-1)
+            student_log_probs = torch.log_softmax(student_logits / self.temperature, dim=-1)
         else:
             doc_embeddings = model.encode_document(
                 self.documents,
@@ -159,12 +171,14 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
             student_scores = model.similarity_pairwise(query_embeddings, doc_embeddings).cpu()
             # One document per query: a per-query distribution is undefined, so this softmaxes over
             # the whole dataset (a single global distribution). Not comparable to the per-query KL.
-            teacher_log_probs = torch.log_softmax(self.scores, dim=-1)
-            student_log_probs = torch.log_softmax(student_scores, dim=-1)
+            teacher_log_probs = torch.log_softmax(self.scores / self.temperature, dim=-1)
+            student_log_probs = torch.log_softmax(student_scores / self.temperature, dim=-1)
 
-        kl = torch.nn.functional.kl_div(
-            student_log_probs, teacher_log_probs, reduction="batchmean", log_target=True
-        ).item()
+        # batchmean averages the per-query KL over queries. On the flat path it would divide the
+        # single global KL by the number of pairs, so report the full sum there instead.
+        reduction = "batchmean" if self.nested_documents else "sum"
+        kl = torch.nn.functional.kl_div(student_log_probs, teacher_log_probs, reduction=reduction, log_target=True)
+        kl = kl.item() * self.temperature**2
         if self.nested_documents:
             # Rank within each query, matching the per-query KL above: absolute MaxSim scores are
             # not comparable across queries (see the class docstring).
@@ -197,3 +211,12 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
         metrics = self.prefix_name_to_metrics(metrics, self.name)
         self.store_metrics_in_model_card_data(model, metrics, epoch, steps)
         return metrics
+
+    def get_config_dict(self) -> dict[str, Any]:
+        config_dict = {}
+        if self.temperature != 1.0:
+            config_dict["temperature"] = self.temperature
+        # normalize_scores does nothing on the flat path.
+        if self.nested_documents and not self.normalize_scores:
+            config_dict["normalize_scores"] = self.normalize_scores
+        return config_dict
