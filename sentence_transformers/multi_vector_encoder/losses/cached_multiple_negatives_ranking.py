@@ -60,6 +60,37 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
         size_average: Whether to average (``True``, default) or sum the cross-entropy loss across the batch.
         gather_across_devices: If True, AllGather document embeddings across DDP ranks.
         show_progress_bar: If True, show a TQDM progress bar for the embedding / scoring steps.
+
+    Example:
+        ::
+
+            from datasets import Dataset
+
+            from sentence_transformers import (
+                MultiVectorEncoder,
+                MultiVectorEncoderTrainer,
+                MultiVectorEncoderTrainingArguments,
+            )
+            from sentence_transformers.multi_vector_encoder.losses import (
+                CachedMultiVectorMultipleNegativesRankingLoss,
+            )
+
+            model = MultiVectorEncoder("answerdotai/ModernBERT-base")
+            train_dataset = Dataset.from_dict(
+                {
+                    "query": ["What is the capital of France?", "Who painted the Mona Lisa?"],
+                    "positive": ["Paris is the capital of France.", "Leonardo da Vinci painted the Mona Lisa."],
+                    "negative": ["Berlin is the capital of Germany.", "Van Gogh painted The Starry Night."],
+                }
+            )
+            # The large batch is what this loss buys you, mini_batch_size bounds the memory it costs.
+            loss = CachedMultiVectorMultipleNegativesRankingLoss(model, mini_batch_size=8)
+            args = MultiVectorEncoderTrainingArguments(
+                output_dir="models/multivector-cached-mnrl", per_device_train_batch_size=64
+            )
+
+            trainer = MultiVectorEncoderTrainer(model=model, args=args, train_dataset=train_dataset, loss=loss)
+            trainer.train()
     """
 
     # Enables per-sample media counting in Transformer.preprocess for VLM minibatching

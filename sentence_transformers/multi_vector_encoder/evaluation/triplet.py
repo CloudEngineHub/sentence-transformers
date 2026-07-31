@@ -22,6 +22,27 @@ class MultiVectorTripletEvaluator(TripletEvaluator):
     :meth:`encode_query` (with the query prefix and length). Positives and negatives are encoded via
     :meth:`encode_document`. ``truncate_dim`` is not supported (multi-vector token embeddings have no
     Matryoshka-style truncation) and raises a ValueError.
+
+    Example:
+        ::
+
+            from datasets import load_dataset
+
+            from sentence_transformers import MultiVectorEncoder
+            from sentence_transformers.multi_vector_encoder.evaluation import MultiVectorTripletEvaluator
+
+            model = MultiVectorEncoder("lightonai/GTE-ModernColBERT-v1")
+
+            dataset = load_dataset("sentence-transformers/all-nli", "triplet", split="dev")
+
+            evaluator = MultiVectorTripletEvaluator(
+                anchors=dataset[:1000]["anchor"],
+                positives=dataset[:1000]["positive"],
+                negatives=dataset[:1000]["negative"],
+                name="all-nli-dev",
+            )
+            results = evaluator(model)
+            print(results[evaluator.primary_metric])
     """
 
     def __init__(self, *args, **kwargs) -> None:

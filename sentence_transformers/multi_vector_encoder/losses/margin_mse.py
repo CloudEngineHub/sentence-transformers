@@ -34,6 +34,30 @@ class MultiVectorMarginMSELoss(nn.Module):
             split into row chunks, each re-trimmed to its own longest document, so a single long
             outlier document only widens its own chunk. Chunking is exact for this loss (no
             cross-row interactions). ``None`` (default) runs one merged forward.
+
+    Example:
+        ::
+
+            from datasets import Dataset
+
+            from sentence_transformers import MultiVectorEncoder, MultiVectorEncoderTrainer
+            from sentence_transformers.multi_vector_encoder.losses import MultiVectorMarginMSELoss
+
+            model = MultiVectorEncoder("answerdotai/ModernBERT-base")
+            # label is the teacher margin score(query, positive) - score(query, negative), so a
+            # positive value means the teacher ranked the positive above the negative.
+            train_dataset = Dataset.from_dict(
+                {
+                    "query": ["What is the capital of France?", "Who painted the Mona Lisa?"],
+                    "positive": ["Paris is the capital of France.", "Leonardo da Vinci painted the Mona Lisa."],
+                    "negative": ["Berlin is the capital of Germany.", "Van Gogh painted The Starry Night."],
+                    "label": [3.5, 2.8],
+                }
+            )
+            loss = MultiVectorMarginMSELoss(model)
+
+            trainer = MultiVectorEncoderTrainer(model=model, train_dataset=train_dataset, loss=loss)
+            trainer.train()
     """
 
     # Enables per-sample media counting in Transformer.preprocess, so mini-batching can slice VLM

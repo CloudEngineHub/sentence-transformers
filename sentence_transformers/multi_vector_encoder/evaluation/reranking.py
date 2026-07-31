@@ -26,6 +26,39 @@ class MultiVectorRerankingEvaluator(RerankingEvaluator):
     argument list and the ``samples`` format. This subclass differs only by resolving the scoring from
     the model at call time and encoding queries / documents asymmetrically (via ``encode_query`` /
     ``encode_document``).
+
+    Example:
+        ::
+
+            from datasets import load_dataset
+
+            from sentence_transformers import MultiVectorEncoder
+            from sentence_transformers.multi_vector_encoder.evaluation import MultiVectorRerankingEvaluator
+
+            model = MultiVectorEncoder("lightonai/GTE-ModernColBERT-v1")
+
+            # Each sample pairs a query with its relevant documents and the first-stage distractors.
+            eval_dataset = load_dataset("microsoft/ms_marco", "v1.1", split="validation").select(range(100))
+            samples = [
+                {
+                    "query": sample["query"],
+                    "positive": [
+                        text
+                        for selected, text in zip(sample["passages"]["is_selected"], sample["passages"]["passage_text"])
+                        if selected
+                    ],
+                    "negative": [
+                        text
+                        for selected, text in zip(sample["passages"]["is_selected"], sample["passages"]["passage_text"])
+                        if not selected
+                    ],
+                }
+                for sample in eval_dataset
+            ]
+
+            evaluator = MultiVectorRerankingEvaluator(samples=samples, name="ms-marco-dev")
+            results = evaluator(model)
+            print(results[evaluator.primary_metric])
     """
 
     def __init__(

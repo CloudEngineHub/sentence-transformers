@@ -63,6 +63,27 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
         +-------------------------------------------------+--------+
         | (anchor, positive, negative_1, ..., negative_n) | none   |
         +-------------------------------------------------+--------+
+
+    Example:
+        ::
+
+            from datasets import Dataset
+
+            from sentence_transformers import MultiVectorEncoder, MultiVectorEncoderTrainer
+            from sentence_transformers.multi_vector_encoder.losses import MultiVectorMultipleNegativesRankingLoss
+
+            model = MultiVectorEncoder("answerdotai/ModernBERT-base")
+            train_dataset = Dataset.from_dict(
+                {
+                    "query": ["What is the capital of France?", "Who painted the Mona Lisa?"],
+                    "positive": ["Paris is the capital of France.", "Leonardo da Vinci painted the Mona Lisa."],
+                    "negative": ["Berlin is the capital of Germany.", "Van Gogh painted The Starry Night."],
+                }
+            )
+            loss = MultiVectorMultipleNegativesRankingLoss(model)
+
+            trainer = MultiVectorEncoderTrainer(model=model, train_dataset=train_dataset, loss=loss)
+            trainer.train()
     """
 
     # Enables per-sample media counting in Transformer.preprocess, so mini-batching can slice VLM

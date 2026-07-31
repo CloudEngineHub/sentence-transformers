@@ -46,6 +46,30 @@ class MultiVectorDistillKLDivLoss(nn.Module):
             own longest document, so a single long outlier document only widens its own chunk.
             Chunking is exact for this loss (no cross-row interactions). ``None`` (default) runs one
             merged forward.
+
+    Example:
+        ::
+
+            from datasets import Dataset
+
+            from sentence_transformers import MultiVectorEncoder, MultiVectorEncoderTrainer
+            from sentence_transformers.multi_vector_encoder.losses import MultiVectorDistillKLDivLoss
+
+            model = MultiVectorEncoder("answerdotai/ModernBERT-base")
+            # One label per document column, holding that document's teacher score.
+            train_dataset = Dataset.from_dict(
+                {
+                    "query": ["What is the capital of France?", "Who painted the Mona Lisa?"],
+                    "positive": ["Paris is the capital of France.", "Leonardo da Vinci painted the Mona Lisa."],
+                    "negative": ["Berlin is the capital of Germany.", "Van Gogh painted The Starry Night."],
+                    "label": [[9.5, 2.1], [8.8, 1.4]],
+                }
+            )
+            # Sharpen both distributions with a temperature below 1.0 when scoring many candidates.
+            loss = MultiVectorDistillKLDivLoss(model, temperature=0.25)
+
+            trainer = MultiVectorEncoderTrainer(model=model, train_dataset=train_dataset, loss=loss)
+            trainer.train()
     """
 
     # Enables per-sample media counting in Transformer.preprocess, so mini-batching can slice VLM

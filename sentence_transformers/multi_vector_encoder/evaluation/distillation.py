@@ -65,6 +65,33 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
         batch_size: Batch size for encoding.
         show_progress_bar: Whether to show a progress bar.
         write_csv: Whether to write per-call results to a CSV file under ``output_path``.
+
+    Example:
+        ::
+
+            from sentence_transformers import MultiVectorEncoder
+            from sentence_transformers.multi_vector_encoder.evaluation import MultiVectorDistillationEvaluator
+
+            model = MultiVectorEncoder("lightonai/GTE-ModernColBERT-v1")
+
+            queries = ["What is the capital of France?", "Who painted the Mona Lisa?"]
+            # One candidate list per query, with the matching teacher scores.
+            documents = [
+                ["Paris is the capital of France.", "Berlin is the capital of Germany."],
+                ["Leonardo da Vinci painted the Mona Lisa.", "Van Gogh painted The Starry Night."],
+            ]
+            scores = [[9.5, 2.1], [8.8, 1.4]]
+
+            evaluator = MultiVectorDistillationEvaluator(
+                queries=queries,
+                documents=documents,
+                scores=scores,
+                # Match the training loss's temperature so the reported KL tracks the training loss.
+                temperature=0.25,
+                name="msmarco-dev",
+            )
+            results = evaluator(model)
+            print(results[evaluator.primary_metric])
     """
 
     def __init__(
