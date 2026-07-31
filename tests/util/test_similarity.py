@@ -6,7 +6,6 @@ import sklearn
 import torch
 
 from sentence_transformers.sparse_encoder import SparseEncoder
-from sentence_transformers.util import similarity as similarity_module
 from sentence_transformers.util.similarity import (
     _document_chunk_ranges,
     cos_sim,
@@ -582,8 +581,6 @@ def test_maxsim_fully_masked_document_scores_sentinel(caplog) -> None:
     b_mask = torch.ones(3, 5, dtype=torch.bool)
     b_mask[1] = False
 
-    # warning_once caches globally, clear so this test does not depend on run order.
-    similarity_module.logger.warning_once.cache_clear()
     with caplog.at_level("WARNING"):
         scores = maxsim(queries, documents, b_mask=b_mask)
     assert torch.isfinite(scores).all()
@@ -609,7 +606,6 @@ def test_maxsim_pairwise_empty_document_scores_sentinel(caplog) -> None:
     queries = [torch.randn(3, 8, generator=generator), torch.randn(2, 8, generator=generator)]
     documents = [torch.randn(4, 8, generator=generator), torch.zeros(0, 8)]
 
-    similarity_module.logger.warning_once.cache_clear()
     with caplog.at_level("WARNING"):
         scores = maxsim_pairwise(queries, documents)
     assert torch.isfinite(scores).all()

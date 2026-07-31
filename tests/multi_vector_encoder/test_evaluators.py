@@ -81,11 +81,9 @@ def test_ir_evaluator_defers_scoring_resolution_to_call_time(model: MultiVectorE
     assert f"late_binding_{model.similarity_fn_name}_ndcg@10" in results
 
 
-def test_ir_evaluator_warns_when_explicit_prompt_replaces_model_prompt(caplog) -> None:
+def test_ir_evaluator_warns_when_explicit_prompt_replaces_model_prompt(caplog, clear_warning_once_cache) -> None:
     """An explicit query_prompt replaces the model's registered marker prompt instead of composing
     with it, so the evaluator warns once."""
-    from sentence_transformers.multi_vector_encoder.evaluation import information_retrieval
-
     prompted_model = MultiVectorEncoder(
         "sentence-transformers-testing/stsb-bert-tiny-safetensors",
         prompts={"query": "[Q] ", "document": "[D] "},
@@ -102,8 +100,6 @@ def test_ir_evaluator_warns_when_explicit_prompt_replaces_model_prompt(caplog) -
         write_csv=False,
         query_prompt="Represent this sentence: ",
     )
-    # warning_once caches globally, clear so this test does not depend on run order.
-    information_retrieval.logger.warning_once.cache_clear()
     with caplog.at_level("WARNING"):
         evaluator(prompted_model)
     assert "query_prompt replaces the model's registered 'query' prompt" in caplog.text
@@ -116,7 +112,9 @@ def test_ir_evaluator_warns_when_explicit_prompt_replaces_model_prompt(caplog) -
         name="prompt_keep",
         write_csv=False,
     )
-    information_retrieval.logger.warning_once.cache_clear()
+    # The first block already emitted the warning, so clear again to keep the absence below coming
+    # from the prompt logic rather than from the cache.
+    clear_warning_once_cache()
     with caplog.at_level("WARNING"):
         evaluator(prompted_model)
     assert "replaces the model's registered" not in caplog.text
@@ -131,7 +129,7 @@ def test_ir_evaluator_warns_when_explicit_prompt_replaces_model_prompt(caplog) -
         write_csv=False,
         query_prompt="[Q] Represent this sentence: ",
     )
-    information_retrieval.logger.warning_once.cache_clear()
+    clear_warning_once_cache()
     with caplog.at_level("WARNING"):
         evaluator(prompted_model)
     assert "replaces the model's registered" not in caplog.text

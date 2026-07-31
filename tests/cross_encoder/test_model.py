@@ -17,7 +17,7 @@ from transformers import __version__ as transformers_version
 
 from sentence_transformers import CrossEncoder
 from sentence_transformers.sentence_transformer.modules import StaticEmbedding
-from sentence_transformers.util import decorators, fullname
+from sentence_transformers.util import fullname
 from sentence_transformers.util.decorators import (
     cross_encoder_init_args_decorator,
     cross_encoder_predict_rank_args_decorator,
@@ -604,9 +604,6 @@ def test_predict_rank_args_decorator(
 
     monkeypatch.setattr(CrossEncoder, "predict", mock_predict)
 
-    # warning_once caches globally by message, and other suites (e.g. sparse encode_query with
-    # sentences=) emit the same rename text, so clear it to keep this test order-independent.
-    decorators.logger.warning_once.cache_clear()
     with caplog.at_level(logging.WARNING):
         model.predict(**in_kwargs)
         assert caplog.text != ""
