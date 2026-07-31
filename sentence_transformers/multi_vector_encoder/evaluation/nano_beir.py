@@ -31,7 +31,7 @@ class MultiVectorNanoBEIREvaluator(NanoBEIREvaluator):
             NanoBEIR collection for non-English evaluation.
         corpus_chunk_size (int): How many documents to encode + score per round-trip. Larger values
             mean more encoded doc embeddings live in memory at once but fewer encode-pass round-trips.
-            Defaults to 50000.
+            Defaults to 5000.
         document_chunk_elements (int, optional): Element budget for the 4D
             ``(batch_q, chunk, q_tokens, d_tokens)`` MaxSim scoring intermediate, forwarded to
             :func:`~sentence_transformers.util.maxsim`, which packs document chunks under it,
@@ -82,7 +82,7 @@ class MultiVectorNanoBEIREvaluator(NanoBEIREvaluator):
     def __init__(
         self,
         *args,
-        corpus_chunk_size: int = 50000,
+        corpus_chunk_size: int = 5000,
         document_chunk_elements: int | None = None,
         **kwargs,
     ) -> None:

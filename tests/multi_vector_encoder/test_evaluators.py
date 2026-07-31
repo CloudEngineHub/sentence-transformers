@@ -81,6 +81,86 @@ def test_ir_evaluator_defers_scoring_resolution_to_call_time(model: MultiVectorE
     assert f"late_binding_{model.similarity_fn_name}_ndcg@10" in results
 
 
+def test_ir_evaluator_warns_when_explicit_prompt_replaces_model_prompt(caplog) -> None:
+    """An explicit query_prompt replaces the model's registered marker prompt instead of composing
+    with it, so the evaluator warns once."""
+    from sentence_transformers.multi_vector_encoder.evaluation import information_retrieval
+
+    prompted_model = MultiVectorEncoder(
+        "sentence-transformers-testing/stsb-bert-tiny-safetensors",
+        prompts={"query": "[Q] ", "document": "[D] "},
+    )
+    queries = {"q0": "What is the capital of France?"}
+    corpus = {"d0": "Paris is the capital of France.", "d1": "Berlin is the capital of Germany."}
+    qrels = {"q0": {"d0"}}
+
+    evaluator = MultiVectorInformationRetrievalEvaluator(
+        queries=queries,
+        corpus=corpus,
+        relevant_docs=qrels,
+        name="prompt_replace",
+        write_csv=False,
+        query_prompt="Represent this sentence: ",
+    )
+    # warning_once caches globally, clear so this test does not depend on run order.
+    information_retrieval.logger.warning_once.cache_clear()
+    with caplog.at_level("WARNING"):
+        evaluator(prompted_model)
+    assert "query_prompt replaces the model's registered 'query' prompt" in caplog.text
+
+    caplog.clear()
+    evaluator = MultiVectorInformationRetrievalEvaluator(
+        queries=queries,
+        corpus=corpus,
+        relevant_docs=qrels,
+        name="prompt_keep",
+        write_csv=False,
+    )
+    information_retrieval.logger.warning_once.cache_clear()
+    with caplog.at_level("WARNING"):
+        evaluator(prompted_model)
+    assert "replaces the model's registered" not in caplog.text
+
+    # An explicit prompt that starts with the registered marker keeps it, so no warning either.
+    caplog.clear()
+    evaluator = MultiVectorInformationRetrievalEvaluator(
+        queries=queries,
+        corpus=corpus,
+        relevant_docs=qrels,
+        name="prompt_compose",
+        write_csv=False,
+        query_prompt="[Q] Represent this sentence: ",
+    )
+    information_retrieval.logger.warning_once.cache_clear()
+    with caplog.at_level("WARNING"):
+        evaluator(prompted_model)
+    assert "replaces the model's registered" not in caplog.text
+
+
+def test_ir_evaluator_rejects_document_chunk_elements_with_score_functions() -> None:
+    """document_chunk_elements only configures the default model-resolved scoring, so pairing it
+    with score_functions raises instead of being silently ignored."""
+    from sentence_transformers.util import maxsim
+
+    queries = {"q0": "What is the capital of France?"}
+    corpus = {"d0": "Paris is the capital of France."}
+    qrels = {"q0": {"d0"}}
+    with pytest.raises(ValueError, match="document_chunk_elements"):
+        MultiVectorInformationRetrievalEvaluator(
+            queries=queries,
+            corpus=corpus,
+            relevant_docs=qrels,
+            score_functions={"maxsim": maxsim},
+            document_chunk_elements=1_000_000,
+        )
+    MultiVectorInformationRetrievalEvaluator(
+        queries=queries, corpus=corpus, relevant_docs=qrels, document_chunk_elements=1_000_000
+    )
+    MultiVectorInformationRetrievalEvaluator(
+        queries=queries, corpus=corpus, relevant_docs=qrels, score_functions={"maxsim": maxsim}
+    )
+
+
 def test_triplet_evaluator(model: MultiVectorEncoder) -> None:
     evaluator = MultiVectorTripletEvaluator(
         anchors=["What is the capital of France?"],

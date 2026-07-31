@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 from functools import partial
 from typing import TYPE_CHECKING
 
 from torch import Tensor
+from transformers.utils import logging as transformers_logging
 
 from sentence_transformers.sentence_transformer.evaluation.information_retrieval import (
     InformationRetrievalEvaluator,
@@ -18,7 +18,8 @@ if TYPE_CHECKING:
     from sentence_transformers.base.modality_types import SingleInput
     from sentence_transformers.multi_vector_encoder.model import MultiVectorEncoder
 
-logger = logging.getLogger(__name__)
+# NOTE: transformers wraps the regular logging module for e.g. warning_once
+logger = transformers_logging.get_logger(__name__)
 
 
 class MultiVectorInformationRetrievalEvaluator(InformationRetrievalEvaluator):
@@ -33,7 +34,7 @@ class MultiVectorInformationRetrievalEvaluator(InformationRetrievalEvaluator):
         relevant_docs (Dict[str, Set[str]]): Mapping of query ID to the set of relevant document IDs.
         corpus_chunk_size (int): How many documents to encode and score per round-trip. Larger values
             mean more encoded doc embeddings live in memory at once but fewer encode-pass round-trips.
-            Defaults to 50000.
+            Defaults to 5000.
         document_chunk_elements (int, optional): Element budget for the 4D
             ``(batch_q, chunk, q_tokens, d_tokens)`` MaxSim scoring intermediate, forwarded to
             :func:`~sentence_transformers.util.maxsim`, which packs document chunks under it,
@@ -107,7 +108,7 @@ class MultiVectorInformationRetrievalEvaluator(InformationRetrievalEvaluator):
         queries: dict[str, SingleInput],
         corpus: dict[str, SingleInput],
         relevant_docs: dict[str, set[str]],
-        corpus_chunk_size: int = 50000,
+        corpus_chunk_size: int = 5000,
         document_chunk_elements: int | None = None,
         score_functions: dict[str, Callable[[Tensor, Tensor], Tensor]] | None = None,
         **kwargs,
@@ -119,6 +120,12 @@ class MultiVectorInformationRetrievalEvaluator(InformationRetrievalEvaluator):
                 "the full dimension."
             )
         if score_functions is not None:
+            if document_chunk_elements is not None:
+                raise ValueError(
+                    "document_chunk_elements only configures the default model-resolved scoring, so it "
+                    "would be silently ignored alongside score_functions. Bind the budget into your own "
+                    "callable instead, e.g. functools.partial(maxsim, document_chunk_elements=...)."
+                )
             # XTR's global top-k would be taken per corpus chunk, silently wrong for any corpus > corpus_chunk_size.
             from sentence_transformers.multi_vector_encoder.scoring import XTRScores, xtr_scores
 
@@ -152,6 +159,22 @@ class MultiVectorInformationRetrievalEvaluator(InformationRetrievalEvaluator):
         *args,
         **kwargs,
     ) -> dict[str, float]:
+        for explicit_prompt, param_name, role_keys in (
+            (self.query_prompt, "query_prompt", ("query",)),
+            (self.corpus_prompt, "corpus_prompt", ("document", "passage", "corpus")),
+        ):
+            if explicit_prompt is None:
+                continue
+            # Mirror encode_query / encode_document: the first present role key is the prompt the
+            # model would have used.
+            role = next((key for key in role_keys if key in model.prompts), None)
+            registered = model.prompts.get(role) if role is not None else None
+            if registered and not explicit_prompt.startswith(registered):
+                logger.warning_once(
+                    f"The explicit {param_name} replaces the model's registered {role!r} prompt "
+                    f"({registered!r}) rather than composing with it. Include the model's "
+                    f"marker prompt in {param_name} if the trained prompt should be kept."
+                )
         # Resolve the default scoring from the model here instead of letting the parent fall back to
         # bare model.similarity. Without an explicit document_chunk_elements, maxsim's default
         # element budget bounds the scoring intermediate on its own.
