@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+import torch
 
 from sentence_transformers import MultiVectorEncoder
 from sentence_transformers.multi_vector_encoder.evaluation import (
@@ -177,6 +178,68 @@ def test_distillation_evaluator_per_query_candidate_sets(model: MultiVectorEncod
     assert "distill_kd_spearman" in results
     assert "distill_kd_kl_divergence" in results
     assert results["distill_kd_kl_divergence"] >= 0.0
+
+
+def _student_kd_scores(model: MultiVectorEncoder, queries: list[str], documents: list[list[str]]) -> torch.Tensor:
+    """Mirror the evaluator's student MaxSim scoring so teacher scores can be built from it."""
+    n_ways = len(documents[0])
+    query_embeddings = model.encode_query(queries, convert_to_tensor=True)
+    doc_embeddings = model.encode_document([document for row in documents for document in row], convert_to_tensor=True)
+    return torch.stack(
+        [model.similarity_pairwise(query_embeddings, doc_embeddings[way::n_ways]).cpu() for way in range(n_ways)],
+        dim=1,
+    )
+
+
+def test_distillation_evaluator_spearman_is_per_query(model: MultiVectorEncoder) -> None:
+    """A student reproducing the teacher's within-query ranking exactly must score Spearman 1.0,
+    regardless of the per-query score bands."""
+    queries = ["What is the capital of France?", "Who painted the Mona Lisa?"]
+    documents = [
+        ["Paris is the capital of France.", "Berlin is the capital of Germany.", "Madrid is the capital of Spain."],
+        [
+            "Leonardo da Vinci painted the Mona Lisa.",
+            "Van Gogh painted The Starry Night.",
+            "Monet painted Water Lilies.",
+        ],
+    ]
+    student_scores = _student_kd_scores(model, queries, documents)
+    # At most one of the two block offsets can coincide with the student's global score ordering,
+    # so a global Spearman cannot report 1.0 for both teachers.
+    for offsets in ([[0.0], [100.0]], [[100.0], [0.0]]):
+        teacher_scores = student_scores + torch.tensor(offsets)
+        evaluator = MultiVectorDistillationEvaluator(
+            queries=queries,
+            documents=documents,
+            scores=teacher_scores.tolist(),
+            name="distill_offset",
+            write_csv=False,
+        )
+        results = evaluator(model)
+        assert results["distill_offset_spearman"] == pytest.approx(1.0)
+
+
+def test_distillation_evaluator_spearman_skips_constant_queries(model: MultiVectorEncoder) -> None:
+    # A constant teacher row has no defined rank correlation: it is skipped from the mean, and 0.0
+    # is reported when every query is skipped.
+    queries = ["What is the capital of France?", "Who painted the Mona Lisa?"]
+    documents = [
+        ["Paris is the capital of France.", "Berlin is the capital of Germany."],
+        ["Leonardo da Vinci painted the Mona Lisa.", "Van Gogh painted The Starry Night."],
+    ]
+    teacher_scores = _student_kd_scores(model, queries, documents).tolist()
+    teacher_scores[0] = [1.0, 1.0]
+    evaluator = MultiVectorDistillationEvaluator(
+        queries=queries, documents=documents, scores=teacher_scores, name="distill_constant", write_csv=False
+    )
+    results = evaluator(model)
+    assert results["distill_constant_spearman"] == pytest.approx(1.0)
+
+    evaluator = MultiVectorDistillationEvaluator(
+        queries=queries, documents=documents, scores=[[1.0, 1.0], [2.0, 2.0]], name="distill_constant", write_csv=False
+    )
+    results = evaluator(model)
+    assert results["distill_constant_spearman"] == 0.0
 
 
 def test_distillation_evaluator_rejects_mismatched_nested_shapes() -> None:

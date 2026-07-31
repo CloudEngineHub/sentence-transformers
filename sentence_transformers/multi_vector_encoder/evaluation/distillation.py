@@ -25,16 +25,23 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
     - **Per-query candidate sets** (the KD training format, matching
       :class:`~sentence_transformers.multi_vector_encoder.losses.MultiVectorDistillKLDivLoss` and
       PyLate): ``documents`` is a list of N-way candidate lists per query and ``scores`` the matching
-      2-D teacher scores. The KL divergence is computed per query over its own candidate set (with the
-      same optional min-max normalization as the loss), so the metric tracks the training loss.
-    - **Flat pairs**: one document per query with 1-D scores. A per-query distribution is undefined
-      here, so the KL softmaxes over the whole dataset as a single distribution: not comparable to the
-      per-query KL or to PyLate.
+      2-D teacher scores. Both metrics are computed per query, so they track the training loss: the KL
+      divergence over each query's own candidate set (with the same optional min-max normalization as
+      the loss) and the Spearman as the mean of the per-query rank correlations.
+    - **Flat pairs**: one document per query with 1-D scores. A per-query distribution or ranking is
+      undefined here, so the KL softmaxes over the whole dataset as a single distribution (not
+      comparable to the per-query KL or to PyLate) and the Spearman is one global correlation over
+      all pairs.
 
     Reported metrics:
 
     - KL divergence between teacher and student score distributions (lower is better).
-    - Spearman rank correlation between teacher and student scores (higher is better, the primary metric).
+    - Spearman rank correlation between teacher and student scores (higher is better, the primary
+      metric). With candidate sets this is the mean of the per-query correlations: MaxSim scores are
+      summed over query tokens, so absolute scores are not comparable across queries and a single
+      correlation over all scores would mostly measure per-query offsets rather than ranking. Queries
+      where the teacher or student scores are constant have no defined rank correlation and are
+      skipped from the mean (0.0 is reported if every query is skipped).
 
     The Spearman score is generally a more interpretable mid-training signal than raw KL.
 
@@ -158,9 +165,19 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
         kl = torch.nn.functional.kl_div(
             student_log_probs, teacher_log_probs, reduction="batchmean", log_target=True
         ).item()
-        spearman, _ = spearmanr(self.scores.numpy().ravel(), student_scores.numpy().ravel())
-        if spearman != spearman:  # NaN if all scores are constant
-            spearman = 0.0
+        if self.nested_documents:
+            # Rank within each query, matching the per-query KL above: absolute MaxSim scores are
+            # not comparable across queries (see the class docstring).
+            per_query = []
+            for teacher_row, student_row in zip(self.scores.numpy(), student_scores.numpy()):
+                correlation, _ = spearmanr(teacher_row, student_row)
+                if correlation == correlation:  # NaN if either row is constant, skip those queries
+                    per_query.append(correlation)
+            spearman = sum(per_query) / len(per_query) if per_query else 0.0
+        else:
+            spearman, _ = spearmanr(self.scores.numpy(), student_scores.numpy())
+            if spearman != spearman:  # NaN if all scores are constant
+                spearman = 0.0
 
         metrics = {"kl_divergence": kl, "spearman": float(spearman)}
         logger.info(f"KL divergence:\t{kl:.4f}")
