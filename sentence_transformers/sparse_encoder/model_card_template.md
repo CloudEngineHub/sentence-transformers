@@ -21,6 +21,12 @@ This is a [{{ model_type or "Sparse Encoder" }}](https://www.sbert.net/docs/spar
     <!-- - **Base model:** [Unknown](https://huggingface.co/unknown) -->
 {%- endif %}
 - **Maximum Sequence Length:** {{ model_max_length }} tokens
+{%- if query_length %}
+    - **Maximum Query Length:** {{ query_length }} tokens
+{%- endif %}
+{%- if document_length %}
+    - **Maximum Document Length:** {{ document_length }} tokens
+{%- endif %}
 - **Output Dimensionality:** {{ output_dimensionality }} dimensions{% if max_active_dims %} (trained with {{ max_active_dims }} maximum active dimensions){% endif %}
 - **Similarity Function:** {{ similarity_fn_name }}
 {% if supported_modalities -%}

@@ -87,16 +87,18 @@ class MultiVectorEncoderModelCardData(BaseModelCardData):
 
     def get_model_specific_metadata(self) -> dict[str, Any]:
         metadata = super().get_model_specific_metadata()
-        # query_length / document_length live on the backbone Transformer, not on the model.
-        transformer = next((module for module in self.model if isinstance(module, Transformer)), None)
         metadata.update(
             {
                 "output_dimensionality": self.model.get_embedding_dimension(),
                 "similarity_fn_name": self.model.similarity_fn_name,
-                "query_length": getattr(transformer, "query_length", None),
-                "document_length": getattr(transformer, "document_length", None),
             }
         )
+        # A "fixed" expansion pins every query to its own length, overriding the base's query_length.
+        # "min" only sets a floor, so there query_length remains the cap.
+        transformer = next((module for module in self.model if isinstance(module, Transformer)), None)
+        query_expansion = getattr(transformer, "query_expansion", None) or {}
+        if query_expansion.get("strategy") == "fixed":
+            metadata["query_length"] = query_expansion["length"]
         return metadata
 
     def run_usage_snippet(self) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from PIL import Image
@@ -266,4 +267,46 @@ def test_model_card_base(
         assert substring in model_card, f"expected substring not found: {substring!r}"
 
     # Two consecutive blank lines anywhere is a rendering bug.
+    assert "\n\n\n" not in model_card
+
+
+@pytest.mark.parametrize(
+    ("knobs", "expected_rows"),
+    [
+        ({}, ""),
+        ({"document_length": 180}, "\n    - **Maximum Document Length:** 180 tokens"),
+        ({"query_length": 128}, "\n    - **Maximum Query Length:** 128 tokens"),
+        # strategy="fixed" pins every query to the expansion length, overriding query_length. Converted
+        # ColBERT checkpoints carry their 32 here with no query_length at all.
+        (
+            {"query_expansion": {"strategy": "fixed", "length": 32}},
+            "\n    - **Maximum Query Length:** 32 tokens",
+        ),
+        (
+            {"query_length": 128, "query_expansion": {"strategy": "fixed", "length": 32}},
+            "\n    - **Maximum Query Length:** 32 tokens",
+        ),
+        # strategy="min" only sets a floor, so query_length remains the cap.
+        (
+            {"query_length": 128, "query_expansion": {"strategy": "min", "length": 32}},
+            "\n    - **Maximum Query Length:** 128 tokens",
+        ),
+    ],
+)
+def test_model_card_renders_query_and_document_lengths(
+    bert_tiny_mve_model: MultiVectorEncoder, knobs: dict[str, Any], expected_rows: str
+) -> None:
+    # The generic Maximum Sequence Length row alone is misleading for ColBERT-style models: the
+    # summary must also list the real per-task caps when the Transformer carries them.
+    model = bert_tiny_mve_model
+    model.model_card_data.local_files_only = True
+    for key, value in knobs.items():
+        setattr(model[0], key, value)
+
+    model_card = generate_model_card(model)
+
+    expected = (
+        f"- **Maximum Sequence Length:** {model.max_seq_length} tokens{expected_rows}\n- **Output Dimensionality:**"
+    )
+    assert expected in model_card
     assert "\n\n\n" not in model_card

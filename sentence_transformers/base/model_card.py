@@ -1880,11 +1880,16 @@ class BaseModelCardData(CardData):
     def get_model_specific_metadata(self) -> dict[str, Any]:
         if self.model is None:
             return {}
+        from sentence_transformers.base.modules import Transformer
+
         supported_modalities = [format_modality(m).title() for m in self.model.modalities]
+        transformer = next((module for module in self.model if isinstance(module, Transformer)), None)
         return {
             "model_max_length": self.model.max_seq_length,
             "model_string": str(self.model),
             "supported_modalities": supported_modalities,
+            "query_length": getattr(transformer, "query_length", None),
+            "document_length": getattr(transformer, "document_length", None),
         }
 
     def get_default_model_name(self) -> str:

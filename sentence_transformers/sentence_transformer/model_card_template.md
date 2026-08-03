@@ -22,6 +22,12 @@ This is a [sentence-transformers](https://www.SBERT.net) model{% if base_model %
     <!-- - **Base model:** [Unknown](https://huggingface.co/unknown) -->
 {%- endif %}
 - **Maximum Sequence Length:** {{ model_max_length }} tokens
+{%- if query_length %}
+    - **Maximum Query Length:** {{ query_length }} tokens
+{%- endif %}
+{%- if document_length %}
+    - **Maximum Document Length:** {{ document_length }} tokens
+{%- endif %}
 - **Output Dimensionality:** {{ output_dimensionality }} dimensions
 - **Similarity Function:** {{ similarity_fn_name }}
 {% if supported_modalities -%}
