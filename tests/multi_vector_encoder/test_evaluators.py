@@ -189,6 +189,22 @@ def test_triplet_evaluator_writes_csv_rows(model: MultiVectorEncoder, tmp_path) 
     assert len(lines) >= 2, f"Expected at least header + 1 row, got {len(lines)} line(s)"
 
 
+def test_triplet_evaluator_config_dict_margin() -> None:
+    # Regression: the default-margin check compared against the dense similarity keys, so the
+    # default {"maxsim": 0} margin was recorded in every model card as if it were non-default.
+    evaluator = MultiVectorTripletEvaluator(anchors=["a"], positives=["p"], negatives=["n"])
+    assert "margin" not in evaluator.get_config_dict()
+
+    evaluator = MultiVectorTripletEvaluator(anchors=["a"], positives=["p"], negatives=["n"], margin=0.5)
+    assert evaluator.get_config_dict()["margin"] == {"maxsim": 0.5}
+
+
+def test_triplet_evaluator_rejects_dense_margin_keys() -> None:
+    # "maxsim" is the only similarity here, so the dense keys would silently score nothing.
+    with pytest.raises(ValueError, match=r"unexpected keys \['cosine'\]"):
+        MultiVectorTripletEvaluator(anchors=["a"], positives=["p"], negatives=["n"], margin={"cosine": 0.5})
+
+
 def test_reranking_evaluator(model: MultiVectorEncoder) -> None:
     evaluator = MultiVectorRerankingEvaluator(
         samples=[

@@ -45,7 +45,7 @@ class TripletEvaluator(BaseEvaluator):
             dot product, Euclidean, and Manhattan similarity. Defaults to None.
         margin (Union[float, Dict[str, float]], optional): Margins for various similarity metrics.
             If a float is provided, it will be used as the margin for all similarity metrics.
-            If a dictionary is provided, the keys should be 'cosine', 'dot', 'manhattan', and 'euclidean'.
+            If a dictionary is provided, the keys must be 'cosine', 'dot', 'manhattan', and 'euclidean'.
             The value specifies the minimum margin by which the negative sample should be further from
             the anchor than the positive sample. Defaults to None.
         name (str): Name for the output. Defaults to "".
@@ -132,6 +132,8 @@ class TripletEvaluator(BaseEvaluator):
         elif isinstance(margin, (float, int)):
             self.margin = {k: margin for k in fn_keys}
         elif isinstance(margin, dict):
+            if unknown_keys := sorted(set(margin) - set(fn_keys)):
+                raise ValueError(f"`margin` got unexpected keys {unknown_keys}, expected keys in {fn_keys}.")
             self.margin = {**{k: 0 for k in fn_keys}, **margin}
         else:
             raise ValueError(f"`margin` should be a float or a dictionary with keys in {fn_keys}.")
@@ -261,7 +263,7 @@ class TripletEvaluator(BaseEvaluator):
 
     def get_config_dict(self):
         config_dict = {}
-        if self.margin != {"cosine": 0, "dot": 0, "manhattan": 0, "euclidean": 0}:
+        if self.margin != {key: 0 for key in self._get_similarity_functions()}:
             config_dict["margin"] = self.margin
         if self.truncate_dim is not None:
             config_dict["truncate_dim"] = self.truncate_dim

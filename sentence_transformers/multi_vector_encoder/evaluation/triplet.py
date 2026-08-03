@@ -23,6 +23,11 @@ class MultiVectorTripletEvaluator(TripletEvaluator):
     :meth:`encode_document`. ``truncate_dim`` is not supported (multi-vector token embeddings have no
     Matryoshka-style truncation) and raises a ValueError.
 
+    ``maxsim`` is the only supported similarity, so a ``margin`` dictionary must be keyed by it (a
+    float applies to it directly). Note that ``margin`` lives on the MaxSim scale: MaxSim sums a
+    per-token maximum over the query tokens, so scores grow with the query length (roughly one point
+    per query token for normalized embeddings) rather than sitting in cosine's ``[-1, 1]`` range.
+
     Example:
         ::
 

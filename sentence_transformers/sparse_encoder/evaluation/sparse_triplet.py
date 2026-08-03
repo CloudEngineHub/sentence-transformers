@@ -36,7 +36,7 @@ class SparseTripletEvaluator(TripletEvaluator):
             dot product, Euclidean, and Manhattan similarity. Defaults to None.
         margin (Union[float, Dict[str, float]], optional): Margins for various similarity metrics.
             If a float is provided, it will be used as the margin for all similarity metrics.
-            If a dictionary is provided, the keys should be 'cosine', 'dot', 'manhattan', and 'euclidean'.
+            If a dictionary is provided, the keys must be 'cosine', 'dot', 'manhattan', and 'euclidean'.
             The value specifies the minimum margin by which the negative sample should be further from
             the anchor than the positive sample. Defaults to None.
         name (str): Name for the output. Defaults to "".
