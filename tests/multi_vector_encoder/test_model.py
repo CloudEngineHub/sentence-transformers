@@ -900,6 +900,34 @@ def test_multi_vector_mask_respects_partial_expansion_positions() -> None:
     assert out["attention_mask"].tolist() == [[True, True, True, False]]
 
 
+def test_query_expansion_without_mask_module_warns(caplog) -> None:
+    """Only MultiVectorMask puts the expansion tokens in the scoring mask: constructing a pipeline
+    with query_expansion but no MultiVectorMask warns instead of silently dropping them."""
+    base = "sentence-transformers-testing/stsb-bert-tiny-safetensors"
+
+    def make_modules() -> list[torch.nn.Module]:
+        transformer = Transformer(base, query_expansion={"strategy": "fixed", "length": 16})
+        dense = Dense(
+            in_features=transformer.get_embedding_dimension(),
+            out_features=32,
+            bias=False,
+            activation_function=torch.nn.Identity(),
+            module_input_name="token_embeddings",
+        )
+        return [transformer, dense, Normalize(module_input_name="token_embeddings")]
+
+    with caplog.at_level("WARNING"):
+        MultiVectorEncoder(modules=make_modules())
+    assert any("no MultiVectorMask" in record.message for record in caplog.records)
+
+    caplog.clear()
+    modules = make_modules()
+    modules.insert(2, MultiVectorMask())
+    with caplog.at_level("WARNING"):
+        MultiVectorEncoder(modules=modules)
+    assert not any("no MultiVectorMask" in record.message for record in caplog.records)
+
+
 def test_media_counts_run_under_eval_mode(monkeypatch) -> None:
     """trainer.evaluate() collates under model.eval(): the media-count bookkeeping keys on
     ``track_media_counts`` alone (not ``self.training``), or VLM eval-loss batches lose

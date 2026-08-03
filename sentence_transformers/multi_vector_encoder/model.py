@@ -185,10 +185,22 @@ class MultiVectorEncoder(BaseModel):
 
         self._apply_legacy_fixups()
 
-        # Resolve any MultiVectorMask's skiplist words against the tokenizer.
-        for module in self._modules.values():
+        module_list = list(self._modules.values())
+        for index, module in enumerate(module_list):
+            # Resolve any MultiVectorMask's skiplist words against the tokenizer.
             if isinstance(module, MultiVectorMask):
                 module.resolve_with_tokenizer(self.tokenizer)
+            elif (
+                isinstance(module, Transformer)
+                and module.query_expansion is not None
+                and not any(isinstance(follower, MultiVectorMask) for follower in module_list[index + 1 :])
+            ):
+                logger.warning(
+                    "query_expansion is set on the Transformer module, but no MultiVectorMask module "
+                    "follows it. MultiVectorMask is what includes the expansion tokens in the scoring "
+                    "mask, so without one they will not be scored. Add a MultiVectorMask module after "
+                    "the Transformer."
+                )
 
     def encode_query(
         self,
