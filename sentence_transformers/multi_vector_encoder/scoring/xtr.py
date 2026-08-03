@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from sentence_transformers.util.similarity import _fill_empty_document_scores
+from sentence_transformers.util.similarity import _fill_empty_document_scores, _zero_row_mask
 from sentence_transformers.util.tensor import _convert_to_tensor
 
 
@@ -27,11 +27,14 @@ def xtr_scores(
         queries_embeddings: ``(Q, q_tokens, dim)`` query embeddings.
         documents_embeddings: ``(Q, N, d_tokens, dim)`` stacked per-query document groups.
         queries_mask: optional ``(Q, q_tokens)`` mask.
-        documents_mask: optional ``(Q, N, d_tokens)`` mask.
+        documents_mask: optional ``(Q, N, d_tokens)`` mask. If None, one is derived by treating
+            all-zero document rows as padding (like :func:`~sentence_transformers.util.similarity.maxsim`).
         k: Number of top token matches to retain per query token across all Q*N documents.
         document_chunk_size: If set, the matmul + ``masked_fill`` phase is iterated over
-            ``document_chunk_size`` docs at a time (out of Q*N total). Useful to trim transient matmul
-            peak memory at large effective batch sizes. Defaults to None (single matmul).
+            ``document_chunk_size`` docs at a time (out of Q*N total). The chunks are concatenated
+            before the global top-k, so scoring semantics are unchanged and the full score grid is
+            still materialized: this trims the transient matmul peak, not the overall peak. Defaults
+            to None (single matmul).
 
     Notes:
         Adapted from PyLate / PrimeQA (Apache 2.0). Pass this (or :class:`XTRScores`, a configured reusable
@@ -46,16 +49,20 @@ def xtr_scores(
     Db = D * N
     docs_flat = documents_embeddings.reshape(Db, Dt, H)
     Q_flat = queries_embeddings.reshape(Qb * Qt, H)
-    docs_mask_flat = documents_mask.reshape(Db, Dt) if documents_mask is not None else None
+    if documents_mask is not None:
+        docs_mask_flat = documents_mask.reshape(Db, Dt)
+    else:
+        # Mirror maxsim: treat all-zero rows as padding, or a pad token's 0.0 wins the per-document
+        # max over genuinely negative real similarities.
+        docs_mask_flat = _zero_row_mask(docs_flat)
 
     if document_chunk_size is None or document_chunk_size >= Db:
         D_flat = docs_flat.reshape(Db * Dt, H).T
         scores = (Q_flat @ D_flat).view(Qb, Qt, Db, Dt)
-        if docs_mask_flat is not None:
-            scores = scores.masked_fill(
-                ~docs_mask_flat.bool().unsqueeze(0).unsqueeze(0),
-                torch.finfo(scores.dtype).min,
-            )
+        scores = scores.masked_fill(
+            ~docs_mask_flat.bool().unsqueeze(0).unsqueeze(0),
+            torch.finfo(scores.dtype).min,
+        )
     else:
         score_chunks = []
         for d_start in range(0, Db, document_chunk_size):
@@ -63,14 +70,15 @@ def xtr_scores(
             db = d_end - d_start
             chunk_D_flat = docs_flat[d_start:d_end].reshape(db * Dt, H).T
             chunk_scores = (Q_flat @ chunk_D_flat).view(Qb, Qt, db, Dt)
-            if docs_mask_flat is not None:
-                chunk_mask = docs_mask_flat[d_start:d_end]
-                chunk_scores = chunk_scores.masked_fill(
-                    ~chunk_mask.bool().unsqueeze(0).unsqueeze(0),
-                    torch.finfo(chunk_scores.dtype).min,
-                )
+            chunk_mask = docs_mask_flat[d_start:d_end]
+            chunk_scores = chunk_scores.masked_fill(
+                ~chunk_mask.bool().unsqueeze(0).unsqueeze(0),
+                torch.finfo(chunk_scores.dtype).min,
+            )
             score_chunks.append(chunk_scores)
         scores = torch.cat(score_chunks, dim=2)
+        # Freed before the scatter below, or the per-chunk copies and the full grid are alive at once.
+        del score_chunks, chunk_scores
 
     clubbed = scores.flatten(2, 3)
     top_values, indices = clubbed.topk(min(k, clubbed.shape[-1]), dim=-1, sorted=False)
@@ -85,11 +93,9 @@ def xtr_scores(
     scores_sum = topk_scores_max.sum(dim=1)
     Z = topk_scores_max.gt(0).float().sum(dim=1).clamp_(min=1e-3)
     scores = scores_sum / Z
-    if docs_mask_flat is not None:
-        # Every token of a fully masked document sits at the dtype minimum: the sum overflows to -inf
-        # when k spans all tokens, and the scatter flattens it to a retrievable-looking 0 below that.
-        scores = _fill_empty_document_scores(scores, ~docs_mask_flat.bool().any(dim=-1))
-    return scores
+    # Every token of a fully masked document sits at the dtype minimum: the sum overflows to -inf
+    # when k spans all tokens, and the scatter flattens it to a retrievable-looking 0 below that.
+    return _fill_empty_document_scores(scores, ~docs_mask_flat.bool().any(dim=-1))
 
 
 def xtr_kd_scores(
@@ -158,7 +164,8 @@ class XTRScores:
 
     Args:
         k: Number of top token matches to retain per query token across all Q*N documents.
-        document_chunk_size: Iterate the matmul over this many docs at a time to trim peak memory.
+        document_chunk_size: Iterate the matmul over this many docs at a time to trim the transient
+            matmul peak.
     """
 
     def __init__(self, k: int = 256, document_chunk_size: int | None = None) -> None:

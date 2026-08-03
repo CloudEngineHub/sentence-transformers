@@ -802,6 +802,24 @@ def test_xtr_scores_fully_masked_document_scores_sentinel() -> None:
         assert scores[:, [0, 2, 3]].abs().max() < 100
 
 
+def test_xtr_scores_without_mask_excludes_zero_pad_rows() -> None:
+    """On unnormalized embeddings a zero pad row scored 0.0 and beat genuinely negative real maxima:
+    without a mask, one is now derived from all-zero document rows, like maxsim."""
+    from sentence_transformers.multi_vector_encoder.scoring import xtr_scores
+
+    queries = torch.ones(1, 2, 4)
+    documents = torch.full((1, 2, 3, 4), -0.5)
+    documents[0, 1, :2] = -1.0
+    documents[0, 1, 2] = 0.0  # document 1's last row is padding
+    documents_mask = torch.ones(1, 2, 3, dtype=torch.bool)
+    documents_mask[0, 1, 2] = False
+
+    unmasked = xtr_scores(queries, documents)
+    masked = xtr_scores(queries, documents, documents_mask=documents_mask)
+    assert torch.equal(unmasked, masked)
+    assert unmasked[0, 0] > unmasked[0, 1], "the zero-padded document must not outrank the real one"
+
+
 def test_ir_evaluator_rejects_compiled_xtr_scoring() -> None:
     """The XTR rejection must not be evaded by torch.compile, which the XTR docstring itself
     recommends for the hot path."""
