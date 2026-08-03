@@ -18,12 +18,14 @@ class MultiVectorMarginMSELoss(nn.Module):
     document, and one or more negative documents, plus teacher margins ``score(q, pos) - score(q, neg)``,
     the student's MaxSim margins are MSE-matched to the teacher's.
 
-    Two label formats are supported:
+    With ``sentence_features = (query, positive, negative_1, ..., negative_k)``, two label formats are
+    supported:
 
-    1. **Single negative**: ``sentence_features = (query, positive, negative)`` with ``labels`` of shape
-       ``(batch_size,)`` containing the teacher margin ``s(q, pos) - s(q, neg)``.
-    2. **Multiple negatives**: ``sentence_features = (query, positive, negative_1, ..., negative_k)`` with
-       ``labels`` of shape ``(batch_size, k)`` containing per-negative teacher margins.
+    1. **Margins**: ``labels`` of shape ``(batch_size, k)`` containing per-negative teacher margins
+       ``score(q, pos) - score(q, neg_i)``. With a single negative, shape ``(batch_size,)`` is also
+       accepted.
+    2. **Raw scores**: ``labels`` of shape ``(batch_size, k + 1)`` containing teacher scores
+       ``[score(q, pos), score(q, neg_1), ..., score(q, neg_k)]``, converted to margins internally.
 
     Args:
         model: A :class:`~sentence_transformers.MultiVectorEncoder`.
@@ -123,20 +125,26 @@ class MultiVectorMarginMSELoss(nn.Module):
         pos_mask, *neg_masks = masks
         pos_scores = self._score(q, pos, q_mask, pos_mask)
 
+        batch_size = q.shape[0]
+
         if labels.ndim == 1:
             if len(negs) != 1:
                 raise ValueError(
                     f"{type(self).__name__} got 1D labels (shape {tuple(labels.shape)}) but "
                     f"{len(negs)} negative columns (expected 1)."
                 )
-            neg_scores = self._score(q, negs[0], q_mask, neg_masks[0])
-            student_margin = pos_scores - neg_scores
-            return self.loss_function(student_margin, labels.to(student_margin.dtype))
+            labels = labels.unsqueeze(1)
 
-        if labels.ndim != 2 or labels.shape[1] != len(negs):
+        if labels.shape == (batch_size, len(negs) + 1):
+            # Raw scores [s(q, pos), s(q, neg_1), ...]: convert to per-negative margins like the dense loss.
+            labels = labels[:, 0:1] - labels[:, 1:]
+
+        if labels.shape != (batch_size, len(negs)):
             raise ValueError(
-                f"{type(self).__name__} got labels with shape {tuple(labels.shape)} but {len(negs)} "
-                f"negative columns. Expected labels of shape (batch_size, {len(negs)})."
+                f"{type(self).__name__} got labels with shape {tuple(labels.shape)}, expected "
+                f"{(batch_size, len(negs))} for {len(negs)} negative columns. Ensure that your dataset "
+                "labels/scores are 1) lists of differences between positive and negative scores "
+                f"(length {len(negs)}), or 2) lists of positive and negative scores (length {len(negs) + 1})."
             )
         student_margins = torch.stack(
             [pos_scores - self._score(q, n, q_mask, nm) for n, nm in zip(negs, neg_masks)], dim=1

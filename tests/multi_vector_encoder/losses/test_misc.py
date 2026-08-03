@@ -620,3 +620,54 @@ def test_merge_refuses_flattened_features() -> None:
     # Equal per-column longest documents, so the max_length_q metadata match cannot mask the refusal.
     assert columns[0]["max_length_q"] == columns[1]["max_length_q"]
     assert merge_feature_batches(columns) is None
+
+
+@pytest.mark.parametrize("num_negatives", [1, 2])
+def test_margin_mse_accepts_raw_teacher_scores(num_negatives: int) -> None:
+    """Raw teacher scores of shape (batch, num_negatives + 1) must yield the same loss as the
+    equivalent pre-computed margins, matching the dense MarginMSELoss."""
+    batch, dim = 4, 8
+    features = [_make_feature(t_tokens=6, batch=batch, dim=dim, seed=1)] + [
+        _make_feature(t_tokens=10 + 2 * way, batch=batch, dim=dim, seed=2 + way) for way in range(1 + num_negatives)
+    ]
+    generator = torch.Generator().manual_seed(42)
+    raw_scores = torch.randn(batch, num_negatives + 1, generator=generator)
+    margins = raw_scores[:, 0:1] - raw_scores[:, 1:]
+
+    loss = mve_losses.MultiVectorMarginMSELoss(model=_PassthroughModel())
+    raw_value = loss(features, raw_scores).item()
+    margin_value = loss(features, margins).item()
+    assert raw_value == margin_value, f"raw-score labels diverged from margins: {raw_value} vs {margin_value}"
+
+
+def test_margin_mse_accepts_1d_labels_for_single_negative() -> None:
+    """With one negative the margin may arrive as one scalar per row. That 1D form must match the
+    equivalent (batch, 1) column vector."""
+    batch, dim = 4, 8
+    features = [
+        _make_feature(t_tokens=6, batch=batch, dim=dim, seed=1),
+        _make_feature(t_tokens=10, batch=batch, dim=dim, seed=2),
+        _make_feature(t_tokens=12, batch=batch, dim=dim, seed=3),
+    ]
+    generator = torch.Generator().manual_seed(7)
+    margins = torch.randn(batch, generator=generator)
+
+    loss = mve_losses.MultiVectorMarginMSELoss(model=_PassthroughModel())
+    flat_value = loss(features, margins).item()
+    column_value = loss(features, margins.unsqueeze(1)).item()
+    assert flat_value == column_value, f"1D labels diverged from (batch, 1): {flat_value} vs {column_value}"
+
+
+@pytest.mark.parametrize("label_shape", [(2, 3), (1, 1)])
+def test_margin_mse_rejects_mismatched_label_shape(label_shape: tuple[int, int]) -> None:
+    """Labels must match (batch, num_negatives) exactly. A wrong column count is neither margins nor
+    raw scores, and a wrong batch would otherwise broadcast through MSELoss with only a warning."""
+    batch, dim = 2, 8
+    features = [
+        _make_feature(t_tokens=6, batch=batch, dim=dim, seed=1),
+        _make_feature(t_tokens=10, batch=batch, dim=dim, seed=2),
+        _make_feature(t_tokens=12, batch=batch, dim=dim, seed=3),
+    ]
+    loss = mve_losses.MultiVectorMarginMSELoss(model=_PassthroughModel())
+    with pytest.raises(ValueError, match="negative columns"):
+        loss(features, torch.randn(*label_shape))
