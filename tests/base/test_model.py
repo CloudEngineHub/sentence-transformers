@@ -523,10 +523,11 @@ def test_load_logs_no_modules_json(stsb_bert_tiny_model: SentenceTransformer, tm
 
 
 def test_load_logs_converting_model_type(stsb_bert_tiny_model: SentenceTransformer, tmp_path: Path, caplog) -> None:
-    """Loading a SentenceTransformer model as a SparseEncoder should log the converting message."""
+    """Loading a SentenceTransformer model as a SparseEncoder should log the converting message at
+    warning level, so it is visible at the default verbosity."""
     stsb_bert_tiny_model.save(str(tmp_path))
 
-    with caplog.at_level(logging.INFO, logger="sentence_transformers.base.model"):
+    with caplog.at_level(logging.WARNING, logger="sentence_transformers.base.model"):
         SparseEncoder(str(tmp_path))
 
     assert "Converting SentenceTransformer" in caplog.text

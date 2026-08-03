@@ -1027,7 +1027,7 @@ This pull request has been automatically generated to add {self.__class__.__name
             logger.info(f"Loading {self.model_type} model from {model_name_or_path}.")
             return self._load_config_modules(model_name_or_path, **load_kwargs)
 
-        logger.info(f"Converting {model_type_being_loaded} model {model_name_or_path} to {self.model_type}.")
+        logger.warning(f"Converting {model_type_being_loaded} model {model_name_or_path} to {self.model_type}.")
         return self._load_converted_modules(model_name_or_path, **load_kwargs, model_type=model_type_being_loaded)
 
     @abstractmethod
