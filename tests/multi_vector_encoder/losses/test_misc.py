@@ -671,3 +671,15 @@ def test_margin_mse_rejects_mismatched_label_shape(label_shape: tuple[int, int])
     loss = mve_losses.MultiVectorMarginMSELoss(model=_PassthroughModel())
     with pytest.raises(ValueError, match="negative columns"):
         loss(features, torch.randn(*label_shape))
+
+
+@pytest.mark.parametrize(
+    "loss_class",
+    [mve_losses.MultiVectorMultipleNegativesRankingLoss, mve_losses.CachedMultiVectorMultipleNegativesRankingLoss],
+)
+@pytest.mark.parametrize("scale", [0.0, -1.0])
+def test_mnr_rejects_non_positive_scale(loss_class: type[nn.Module], scale: float) -> None:
+    """scale=0.0 zeroes every gradient and a negative scale trains backwards, so the constructor
+    must reject both, matching the dense MultipleNegativesRankingLoss."""
+    with pytest.raises(ValueError, match="Scale must be a positive value."):
+        loss_class(model=_PassthroughModel(), scale=scale)

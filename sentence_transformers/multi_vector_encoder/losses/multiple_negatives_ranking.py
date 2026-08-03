@@ -101,6 +101,8 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
         gather_across_devices: bool = False,
     ) -> None:
         super().__init__()
+        if scale <= 0:
+            raise ValueError("Scale must be a positive value.")
         self.model = model
         self.score_metric = score_metric if score_metric is not None else colbert_scores
         self.scale = scale
