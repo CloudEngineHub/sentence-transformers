@@ -6,6 +6,7 @@ import sklearn
 import torch
 
 from sentence_transformers.sparse_encoder import SparseEncoder
+from sentence_transformers.util import similarity
 from sentence_transformers.util.similarity import (
     _document_chunk_ranges,
     cos_sim,
@@ -488,20 +489,25 @@ def test_maxsim_integer_embeddings_upcast() -> None:
 
 
 def test_document_chunk_ranges_budget_packing() -> None:
-    """Greedy packing keeps each chunk's num_queries * query_tokens * width * count under the
-    budget, isolates a long outlier in its own chunk, and never emits an empty chunk."""
-    # per_document_token = 2 * 8 = 16. Budget 256 allows width * count <= 16.
-    ranges = _document_chunk_ranges([4, 4, 100, 4], num_queries=2, query_tokens=8, element_budget=256)
+    """Greedy packing keeps each chunk's per_document_token * width * count under the budget,
+    isolates a long outlier in its own chunk, and never emits an empty chunk."""
+    # Budget 256 at 16 elements per document token allows width * count <= 16.
+    ranges = _document_chunk_ranges([4, 4, 100, 4], per_document_token=16, element_budget=256)
     assert ranges == [(0, 2), (2, 3), (3, 4)]
 
     # A huge budget packs everything into one chunk, the unchunked-equivalent case.
-    assert _document_chunk_ranges([4, 4, 100, 4], 2, 8, 10**12) == [(0, 4)]
+    assert _document_chunk_ranges([4, 4, 100, 4], 16, 10**12) == [(0, 4)]
 
     # The one-document floor: a single document over budget still gets a chunk.
-    assert _document_chunk_ranges([1000], 2, 8, 256) == [(0, 1)]
+    assert _document_chunk_ranges([1000], 16, 256) == [(0, 1)]
 
     # Uniform widths degrade to fixed-size-style chunks: each 2-document chunk costs exactly 200.
-    assert _document_chunk_ranges([10] * 6, 1, 10, 200) == [(0, 2), (2, 4), (4, 6)]
+    assert _document_chunk_ranges([10] * 6, 10, 200) == [(0, 2), (2, 4), (4, 6)]
+
+    # per_document_fixed adds a width-independent cost per document: 10 * 10 + 100 = 200 each.
+    assert _document_chunk_ranges([10] * 6, 10, 400, per_document_fixed=100) == [(0, 2), (2, 4), (4, 6)]
+    # It counts against the budget even when the documents are zero-width.
+    assert _document_chunk_ranges([0] * 4, 10, 400, per_document_fixed=100) == [(0, 4)]
 
 
 def test_maxsim_element_budget_matches_single_chunk() -> None:
@@ -671,7 +677,7 @@ def test_maxsim_takes_no_data_dependent_branch() -> None:
     b_mask[1] = False
 
     # backend="eager" keeps this about graph capture. Lowering maxsim is a separate concern: inductor
-    # rejects the in-place masked_fill_ against a broadcast mask in _maxsim_reduce_documents.
+    # rejects the in-place masked_fill_ against a broadcast mask in _maxsim_score_documents.
     compiled = torch.compile(maxsim, fullgraph=True, backend="eager")
     scores = compiled(queries, documents, b_mask=b_mask)
     assert torch.allclose(scores, maxsim(queries, documents, b_mask=b_mask))
@@ -690,3 +696,266 @@ def test_maxsim_ragged_list_entry_types(convert) -> None:
     documents = [[[0.8, 0.6]], [[0.1, 0.2], [0.3, 0.4]]]
     scores = maxsim(queries, [convert(document) for document in documents])
     assert torch.allclose(scores, torch.tensor([[1.4, 0.7]]))
+
+
+def test_maxsim_empty_document_set_returns_empty_scores() -> None:
+    """An empty document or query set, as an empty list or a 0-batch tensor, scores as an empty
+    (num_queries, num_documents) matrix instead of crashing in pad_sequence or the reduction."""
+    queries = [torch.randn(3, 8), torch.randn(2, 8)]
+    for empty_documents in ([], torch.zeros(0, 4, 8), torch.zeros(0, 0, 8)):
+        scores = maxsim(queries, empty_documents)
+        assert scores.shape == (2, 0)
+        assert scores.dtype == torch.float32
+    assert maxsim(torch.randn(2, 3, 8), []).shape == (2, 0)
+    assert maxsim([], queries).shape == (0, 2)
+    assert maxsim([], []).shape == (0, 0)
+
+
+def test_maxsim_pairwise_empty_inputs_return_empty_scores() -> None:
+    """Zero pairs, as empty lists or 0-batch tensors on both sides, score as shape (0,) instead of
+    crashing in torch.stack."""
+    for queries, documents in (([], []), (torch.zeros(0, 3, 8), torch.zeros(0, 4, 8)), ([], torch.zeros(0, 4, 8))):
+        scores = maxsim_pairwise(queries, documents)
+        assert scores.shape == (0,)
+        assert scores.dtype == torch.float32
+
+
+def test_maxsim_mismatched_mask_width_raises() -> None:
+    """A caller mask not matching the padded width is a construction bug and raises up front, in
+    both chunk settings and both functions (the chunk loops still truncate batch-wide masks to each
+    chunk's local padding internally)."""
+    generator = torch.Generator().manual_seed(37)
+    queries = torch.randn(2, 3, 8, generator=generator)
+    documents = torch.randn(3, 4, 8, generator=generator)
+    wide_mask = torch.ones(3, 6, dtype=torch.bool)
+
+    for chunk_elements in (None, 1):
+        with pytest.raises(ValueError, match="b_mask"):
+            maxsim(queries, documents, b_mask=wide_mask, document_chunk_elements=chunk_elements)
+    with pytest.raises(ValueError, match="a_mask"):
+        maxsim(queries, documents, a_mask=torch.ones(2, 5))
+    with pytest.raises(ValueError, match="b_mask"):
+        maxsim_pairwise(torch.randn(3, 3, 8), documents, b_mask=wide_mask)
+
+
+def test_maxsim_per_item_mask_lists_match_padded_masks() -> None:
+    """Per-item 1D mask lists are padded to the batch and score identically to the equivalent
+    padded 2D mask, in both scoring functions."""
+    queries = [torch.randn(2, 4), torch.randn(2, 4)]
+    documents = [torch.randn(3, 4), torch.randn(2, 4)]
+    mask_list = [torch.tensor([1.0, 1.0, 0.0]), torch.tensor([1.0, 1.0])]
+    padded_mask = torch.tensor([[1.0, 1.0, 0.0], [1.0, 1.0, 0.0]])
+
+    assert torch.allclose(maxsim(queries, documents, b_mask=mask_list), maxsim(queries, documents, b_mask=padded_mask))
+    assert torch.allclose(
+        maxsim_pairwise(queries, documents, b_mask=mask_list),
+        maxsim_pairwise(queries, documents, b_mask=padded_mask),
+    )
+    with pytest.raises(TypeError, match="a_mask"):
+        maxsim(queries, documents, a_mask="not a mask")
+
+
+def test_maxsim_narrow_mask_raises_value_error() -> None:
+    """A mask narrower than the padded width raises ValueError up front in both paths."""
+    queries = torch.randn(2, 3, 8)
+    documents = torch.randn(3, 5, 8)
+    for chunk_elements in (None, 1):
+        with pytest.raises(ValueError, match="covers 4 tokens"):
+            maxsim(queries, documents, b_mask=torch.ones(3, 4), document_chunk_elements=chunk_elements)
+    with pytest.raises(ValueError, match="covers 2 tokens"):
+        maxsim(queries, documents, a_mask=torch.ones(2, 2))
+    with pytest.raises(ValueError, match="covers 4 tokens"):
+        maxsim_pairwise(torch.randn(3, 3, 8), documents, b_mask=torch.ones(3, 4))
+
+
+def test_maxsim_numpy_queries_score_against_tensor_documents_on_cpu() -> None:
+    """The cpu mix of numpy queries and tensor documents keeps working and matches all-tensor scoring."""
+    queries = torch.randn(2, 3, 8)
+    documents = torch.randn(3, 5, 8)
+    assert torch.allclose(maxsim(queries.numpy(), documents), maxsim(queries, documents), atol=1e-6)
+    assert torch.allclose(
+        maxsim_pairwise(queries.numpy(), documents[:2]), maxsim_pairwise(queries, documents[:2]), atol=1e-6
+    )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA must be available to test mixed devices")
+def test_maxsim_moves_queries_to_the_documents_device() -> None:
+    """Mixed-device inputs reconcile onto the documents' device instead of raising, on every maxsim
+    path (unchunked, chunked, list documents) and both maxsim_pairwise paths."""
+    queries = torch.randn(2, 3, 8)
+    documents = torch.randn(3, 5, 8)
+    expected = maxsim(queries, documents)
+    cuda_documents = documents.cuda()
+
+    for scores in (
+        maxsim(queries.numpy(), cuda_documents),
+        maxsim(queries, cuda_documents, document_chunk_elements=1),
+        maxsim(queries, list(cuda_documents.unbind(0))),
+    ):
+        assert scores.device == cuda_documents.device
+        assert torch.allclose(scores.cpu(), expected, atol=1e-5)
+
+    expected_pairwise = maxsim_pairwise(queries, documents[:2])
+    for pairwise in (
+        maxsim_pairwise(queries.numpy(), cuda_documents[:2]),
+        maxsim_pairwise(list(queries.unbind(0)), list(cuda_documents[:2].unbind(0))),
+    ):
+        assert pairwise.device == cuda_documents.device
+        assert torch.allclose(pairwise.cpu(), expected_pairwise, atol=1e-5)
+
+
+def test_maxsim_pairwise_scores_are_independent_of_pair_chunk_elements() -> None:
+    """Chunking the pair batch is a memory strategy only: every budget scores identically, including
+    the one-pair-per-chunk floor and a ragged batch with a long outlier."""
+    generator = torch.Generator().manual_seed(11)
+    queries = [torch.randn(width, 8, generator=generator) for width in (3, 1, 4, 2, 3)]
+    documents = [torch.randn(width, 8, generator=generator) for width in (2, 40, 3, 1, 5)]
+    b_mask = [torch.ones(width) for width in (2, 40, 3, 1, 5)]
+    b_mask[1][20:] = 0
+
+    expected = maxsim_pairwise(queries, documents, b_mask=b_mask, pair_chunk_elements=10**9)
+    for budget in (1, 13, 400, None):
+        scores = maxsim_pairwise(queries, documents, b_mask=b_mask, pair_chunk_elements=budget)
+        assert torch.allclose(scores, expected, atol=1e-6)
+
+
+def test_maxsim_pairwise_never_pads_the_batch_to_the_global_width(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A long outlier pair sizes only its own chunk, so peak memory stays near the budget instead of
+    padding every pair to the outlier's width (a ~800x regression at reranking scale)."""
+    chunk_shapes = []
+    original = similarity._maxsim_score_pairs
+
+    def record(a, b, a_mask, b_mask):
+        chunk_shapes.append((a.shape[0], a.shape[1], b.shape[1]))
+        return original(a, b, a_mask, b_mask)
+
+    monkeypatch.setattr(similarity, "_maxsim_score_pairs", record)
+
+    generator = torch.Generator().manual_seed(5)
+    widths = [4] * 40
+    widths[17] = 900
+    queries = [torch.randn(6, 8, generator=generator) for _ in widths]
+    documents = [torch.randn(width, 8, generator=generator) for width in widths]
+    budget = 2000
+
+    maxsim_pairwise(queries, documents, pair_chunk_elements=budget)
+
+    assert len(chunk_shapes) > 1
+    # Only the outlier's own chunk may exceed the budget, via the one-pair-per-chunk floor.
+    over_budget = [shape for shape in chunk_shapes if shape[0] * shape[1] * shape[2] > budget]
+    assert over_budget == [(1, 6, 900)]
+
+
+def test_maxsim_pairwise_length_mismatch_raises() -> None:
+    """Unequal query and document counts raise instead of scoring min(len(a), len(b)) pairs: the
+    chunk ranges come from the document side, so a longer query side would silently lose its tail."""
+    queries = [torch.randn(3, 8) for _ in range(5)]
+    documents = [torch.randn(4, 8) for _ in range(3)]
+    for a, b in ((queries, documents), (documents, queries), ([], documents), (queries, [])):
+        with pytest.raises(ValueError, match="same number of items"):
+            maxsim_pairwise(a, b)
+    with pytest.raises(ValueError, match="got 2 and 4"):
+        maxsim_pairwise(torch.randn(2, 3, 8), torch.randn(4, 4, 8))
+
+
+def test_maxsim_budget_bounds_the_live_chunk_elements(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The document budget bounds what the chunk loop actually allocates: the 4D score intermediate
+    plus the chunk's padded documents. The padded queries are allocated once outside the loop, so they
+    are chunk-independent and deliberately excluded.
+
+    A small query side against a wide embedding dim, where the padded documents rather than the score
+    matrix are the dominant term: dropping them from the budget overshoots ~100x here.
+    """
+    chunks = []
+    original = similarity._maxsim_score_documents
+
+    def record(a, b, a_mask, b_mask):
+        live = a.shape[0] * a.shape[1] * b.shape[0] * b.shape[1] + b.numel()
+        chunks.append((b.shape[0], live))
+        return original(a, b, a_mask, b_mask)
+
+    monkeypatch.setattr(similarity, "_maxsim_score_documents", record)
+
+    generator = torch.Generator().manual_seed(29)
+    queries = [torch.randn(2, 128, generator=generator)]
+    widths = [16] * 40
+    widths[25] = 400
+    documents = [torch.randn(width, 128, generator=generator) for width in widths]
+    budget = 20_000
+
+    maxsim(queries, documents, document_chunk_elements=budget)
+
+    assert len(chunks) > 1
+    # Only the outlier may exceed the budget, and only in a chunk of its own (the one-document floor).
+    over_budget = [count for count, live in chunks if live > budget]
+    assert over_budget == [1]
+
+
+def test_maxsim_pairwise_budget_counts_the_padded_queries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Long queries against short documents: the padded query tensor grows with the chunk size, so
+    leaving it out of the budget overshoots several-fold (~4.9x for these shapes)."""
+    live_elements = []
+    original = similarity._maxsim_score_pairs
+
+    def record(a, b, a_mask, b_mask):
+        live_elements.append(a.numel() + b.numel() + a.shape[0] * a.shape[1] * b.shape[1])
+        return original(a, b, a_mask, b_mask)
+
+    monkeypatch.setattr(similarity, "_maxsim_score_pairs", record)
+
+    generator = torch.Generator().manual_seed(23)
+    queries = [torch.randn(512, 16, generator=generator) for _ in range(200)]
+    documents = [torch.randn(4, 16, generator=generator) for _ in range(200)]
+    budget = 100_000
+
+    maxsim_pairwise(queries, documents, pair_chunk_elements=budget)
+
+    assert len(live_elements) > 1
+    assert max(live_elements) <= budget
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA must be available to test mixed devices")
+def test_maxsim_numpy_documents_follow_the_queries_device() -> None:
+    """numpy documents carry no device, so scoring stays on the queries' device rather than silently
+    dragging a gpu workload onto the cpu."""
+    queries = torch.randn(2, 3, 8)
+    documents = torch.randn(3, 5, 8)
+    expected = maxsim(queries, documents)
+    cuda_queries = queries.cuda()
+
+    for scores in (
+        maxsim(cuda_queries, documents.numpy()),
+        maxsim(cuda_queries, documents.numpy(), document_chunk_elements=1),
+        maxsim(cuda_queries, [document.numpy() for document in documents]),
+    ):
+        assert scores.device == cuda_queries.device
+        assert torch.allclose(scores.cpu(), expected, atol=1e-5)
+
+    pairwise = maxsim_pairwise(cuda_queries, documents[:2].numpy())
+    assert pairwise.device == cuda_queries.device
+    assert torch.allclose(pairwise.cpu(), maxsim_pairwise(queries, documents[:2]), atol=1e-5)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA must be available to test mixed devices")
+def test_maxsim_moves_masks_onto_the_scoring_device() -> None:
+    """A caller mask left on the cpu alongside cuda embeddings is moved onto the scoring device
+    instead of crashing inside the masked_fill and einsum kernels."""
+    queries = torch.randn(2, 3, 8)
+    documents = torch.randn(3, 5, 8)
+    a_mask = torch.ones(2, 3)
+    a_mask[1, 2] = 0
+    b_mask = torch.ones(3, 5, dtype=torch.bool)
+    b_mask[:, 4] = False
+
+    expected = maxsim(queries, documents, a_mask=a_mask, b_mask=b_mask)
+    for chunk_elements in (None, 1):
+        scores = maxsim(
+            queries.cuda(), documents.cuda(), a_mask=a_mask, b_mask=b_mask, document_chunk_elements=chunk_elements
+        )
+        assert scores.device.type == "cuda"
+        assert torch.allclose(scores.cpu(), expected, atol=1e-5)
+
+    expected_pairwise = maxsim_pairwise(queries, documents[:2], a_mask=a_mask, b_mask=b_mask[:2])
+    pairwise = maxsim_pairwise(queries.cuda(), documents[:2].cuda(), a_mask=a_mask, b_mask=b_mask[:2])
+    assert pairwise.device.type == "cuda"
+    assert torch.allclose(pairwise.cpu(), expected_pairwise, atol=1e-5)
