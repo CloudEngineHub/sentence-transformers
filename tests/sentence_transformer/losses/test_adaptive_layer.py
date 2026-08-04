@@ -140,3 +140,38 @@ def test_adaptive_layer_loss_error_names_inner_stuck_point(stsb_bert_tiny_model:
     features, labels = _features_and_labels(stsb_bert_tiny_model)
     with pytest.raises(TypeError, match=r"could not unwrap _FakeDDP .*stopped at Linear"):
         adaptive(features, labels)
+
+
+def test_adaptive_layer_loss_kl_teacher_is_detached(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    """Regression test for #3757: the final-layer embeddings are the (teacher) target of the
+    self-distillation KL loss and must be detached, so no gradient flows back into the final
+    layer through them.
+
+    Isolation: with ``last_layer_weight`` and ``prior_layers_weight`` set to 0 the only loss
+    term left is the KL divergence. The *last* transformer layer's parameters influence only
+    the teacher (final) embedding, never the student (intermediate) embeddings, so any gradient
+    reaching them proves the teacher is still in the autograd graph.
+    """
+    model = stsb_bert_tiny_model
+    inner = MultipleNegativesRankingLoss(model)
+    adaptive = AdaptiveLayerLoss(
+        model,
+        inner,
+        n_layers_per_step=-1,  # deterministic: use every prior layer, no random sampling
+        last_layer_weight=0.0,
+        prior_layers_weight=0.0,
+        kl_div_weight=1.0,
+        kl_temperature=0.3,
+    )
+    features, labels = _features_and_labels(model)
+
+    model.zero_grad(set_to_none=True)
+    loss = adaptive(features, labels)
+    loss.backward()
+
+    last_layer = model[0].auto_model.encoder.layer[-1]
+    grad_magnitude = sum(p.grad.abs().sum().item() for p in last_layer.parameters() if p.grad is not None)
+    assert grad_magnitude == 0.0, (
+        "KL teacher (final_embeddings) must be detached: the final layer received "
+        f"gradient magnitude {grad_magnitude} from the KL term."
+    )
