@@ -327,6 +327,7 @@ class BaseTrainer(Trainer, ABC):
             self.train_dataset = self.preprocess_dataset(train_dataset, dataset_name="train")
         if self.eval_dataset is not None:
             self.eval_dataset = self.preprocess_dataset(eval_dataset, dataset_name="eval")
+        self._eval_dataloaders: dict[str, DataLoader] = {}
         self.add_model_card_callback(default_args_dict)
 
     def get_data_collator(
@@ -619,14 +620,13 @@ class BaseTrainer(Trainer, ABC):
 
     def evaluate(
         self,
-        eval_dataset: Dataset | dict[str, Dataset] | None = None,
+        eval_dataset: str | Dataset | dict[str, Dataset] | None = None,
         ignore_keys: list[str] | None = None,
         metric_key_prefix: str = "eval",
     ) -> dict[str, float]:
-        if eval_dataset is not None:
+        # None and str pass through: the superclass recurses over a dict self.eval_dataset by name
+        if eval_dataset is not None and not isinstance(eval_dataset, str):
             eval_dataset = self.preprocess_dataset(eval_dataset, dataset_name="eval")
-        else:
-            eval_dataset = self.eval_dataset
         return super().evaluate(eval_dataset, ignore_keys, metric_key_prefix)
 
     def evaluation_loop(
@@ -925,15 +925,18 @@ class BaseTrainer(Trainer, ABC):
         )
         return self._train_dataloader
 
-    def get_eval_dataloader(self, eval_dataset: Dataset | DatasetDict | IterableDataset | None = None) -> DataLoader:
+    def get_eval_dataloader(
+        self, eval_dataset: str | Dataset | DatasetDict | IterableDataset | None = None
+    ) -> DataLoader:
         """
         Returns the evaluation [`~torch.utils.data.DataLoader`].
 
         Subclass and override this method if you want to inject some custom behavior.
 
         Args:
-            eval_dataset (`torch.utils.data.Dataset`, *optional*):
-                If provided, will override `self.eval_dataset`. If it is a [`~datasets.Dataset`], columns not accepted
+            eval_dataset (`str` or `torch.utils.data.Dataset`, *optional*):
+                If a `str`, will use `self.eval_dataset[eval_dataset]` as the evaluation dataset. If provided
+                otherwise, will override `self.eval_dataset`. If it is a [`~datasets.Dataset`], columns not accepted
                 by the `model.forward()` method are automatically removed. It must implement `__len__`.
         """
         if eval_dataset is None and self.eval_dataset is None:
@@ -942,15 +945,31 @@ class BaseTrainer(Trainer, ABC):
                 return DataLoader([])
             raise ValueError(f"Evaluation requires specifying an eval_dataset to the {self.__class__.__name__}.")
 
-        eval_dataset = eval_dataset if eval_dataset is not None else self.eval_dataset
+        # With persistent workers, reuse prepared dataloaders so repeated evaluations don't leak
+        # workers, see https://github.com/huggingface/transformers/pull/39717
+        dataloader_key = eval_dataset if isinstance(eval_dataset, str) else "eval"
+        # Explicitly passed datasets all share the "eval" key, so never cache those
+        cacheable = isinstance(eval_dataset, str) or eval_dataset is None or eval_dataset is self.eval_dataset
+        if cacheable and self.args.dataloader_persistent_workers and dataloader_key in self._eval_dataloaders:
+            return self._eval_dataloaders[dataloader_key]
+
+        if isinstance(eval_dataset, str):
+            eval_dataset = self.eval_dataset[eval_dataset]
+        elif eval_dataset is None:
+            eval_dataset = self.eval_dataset
 
         # If 'even_batches' is True, it will use the initial few samples to pad out the last sample. This can
         # cause issues with multi-dataset training, so we want to set this to False during training.
         # For evaluation, setting 'even_batches' to False results in hanging, so we keep it as True here.
         self.accelerator.even_batches = True
-        return self.accelerator.prepare(
+        dataloader = self.accelerator.prepare(
             self._build_dataloader(eval_dataset, self.args.eval_batch_size, dataset_kind="eval")
         )
+
+        if cacheable and self.args.dataloader_persistent_workers:
+            self._eval_dataloaders[dataloader_key] = dataloader
+
+        return dataloader
 
     def get_test_dataloader(self, test_dataset: Dataset | DatasetDict | IterableDataset) -> DataLoader:
         """
