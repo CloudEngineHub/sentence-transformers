@@ -183,7 +183,7 @@ class BinaryClassificationEvaluator(BaseEvaluator):
         file_output_data = [epoch, steps]
 
         for header_name in self.csv_headers:
-            if header_name.count("_") == 1:
+            if header_name not in ("epoch", "steps"):
                 sim_fct, metric = header_name.split("_", maxsplit=1)
                 if sim_fct in scores:
                     file_output_data.append(scores[sim_fct][metric])
@@ -247,13 +247,14 @@ class BinaryClassificationEvaluator(BaseEvaluator):
                 "name": "Dot-Product",
                 "greater_is_better": True,
             },
+            # pairwise_*_sim returns negative distances, so negate them back into positive distances (#3702)
             SimilarityFunction.MANHATTAN.value: {
-                "score_fn": lambda x, y: pairwise_manhattan_sim(x, y),
+                "score_fn": lambda x, y: -pairwise_manhattan_sim(x, y),
                 "name": "Manhattan-Distance",
                 "greater_is_better": False,
             },
             SimilarityFunction.EUCLIDEAN.value: {
-                "score_fn": lambda x, y: pairwise_euclidean_sim(x, y),
+                "score_fn": lambda x, y: -pairwise_euclidean_sim(x, y),
                 "name": "Euclidean-Distance",
                 "greater_is_better": False,
             },

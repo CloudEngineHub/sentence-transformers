@@ -16,6 +16,27 @@ from .tensor import _convert_to_batch_tensor, _convert_to_tensor, normalize_embe
 logger = logging.get_logger(__name__)
 
 
+def _match_layouts(a: Tensor, b: Tensor) -> tuple[Tensor, Tensor]:
+    """
+    Converts the dense tensor to sparse COO if exactly one of the two inputs is sparse, so that mixed inputs can
+    reuse the all-sparse computations. The lone dense operand in such a mix typically still holds mostly zeros
+    (e.g. sparse embeddings encoded with ``convert_to_sparse_tensor=False``), making the conversion cheap, whereas
+    densifying the sparse operand would allocate a second full-size dense tensor.
+
+    Args:
+        a (Tensor): The first tensor.
+        b (Tensor): The second tensor.
+
+    Returns:
+        tuple[Tensor, Tensor]: The two tensors, using the same layout.
+    """
+    if a.is_sparse and not b.is_sparse:
+        return a, b.to_sparse()
+    if b.is_sparse and not a.is_sparse:
+        return a.to_sparse(), b
+    return a, b
+
+
 def pytorch_cos_sim(a: Tensor, b: Tensor) -> Tensor:
     """
     Computes the cosine similarity between two tensors.
@@ -124,6 +145,7 @@ def manhattan_sim(a: list | np.ndarray | Tensor, b: list | np.ndarray | Tensor) 
     if a.is_sparse or b.is_sparse:
         logger.warning_once("Using scipy for sparse Manhattan similarity computation.")
 
+        a, b = _match_layouts(a, b)
         a_coo = to_scipy_coo(a)
         b_coo = to_scipy_coo(b)
         dist = pairwise_distances(a_coo, b_coo, metric="manhattan")
@@ -146,6 +168,7 @@ def pairwise_manhattan_sim(a: list | np.ndarray | Tensor, b: list | np.ndarray |
     """
     a = _convert_to_tensor(a)
     b = _convert_to_tensor(b)
+    a, b = _match_layouts(a, b)
 
     return -torch.sum(torch.abs(a - b), dim=-1).to_dense()
 
@@ -165,7 +188,8 @@ def euclidean_sim(a: list | np.ndarray | Tensor, b: list | np.ndarray | Tensor) 
     a = _convert_to_batch_tensor(a)
     b = _convert_to_batch_tensor(b)
 
-    if a.is_sparse:
+    if a.is_sparse or b.is_sparse:
+        a, b = _match_layouts(a, b)
         a_norm_sq = torch.sparse.sum(a * a, dim=1).to_dense().unsqueeze(1)  # Shape (N, 1)
         b_norm_sq = torch.sparse.sum(b * b, dim=1).to_dense().unsqueeze(0)  # Shape (1, M)
         dot_product = torch.matmul(a, b.t()).to_dense()  # Shape (N, M)
@@ -194,6 +218,7 @@ def pairwise_euclidean_sim(a: list | np.ndarray | Tensor, b: list | np.ndarray |
     """
     a = _convert_to_tensor(a)
     b = _convert_to_tensor(b)
+    a, b = _match_layouts(a, b)
 
     return -torch.sqrt(torch.sum((a - b) ** 2, dim=-1)).to_dense()
 
@@ -618,10 +643,12 @@ def pairwise_angle_sim(x: Tensor, y: Tensor) -> Tensor:
     Returns:
         Tensor: Vector with res[i] = angle_sim(a[i], b[i])
     """
-    if x.is_sparse:
+    if x.is_sparse or y.is_sparse:
         logger.warning_once("Pairwise angle similarity does not support sparse tensors. Converting to dense.")
-        x = x.coalesce().to_dense()
-        y = y.coalesce().to_dense()
+        if x.is_sparse:
+            x = x.to_dense()
+        if y.is_sparse:
+            y = y.to_dense()
 
     x = _convert_to_tensor(x)
     y = _convert_to_tensor(y)
