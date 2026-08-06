@@ -68,6 +68,11 @@ def semantic_search_qdrant(
     if not query_embeddings.is_sparse or query_embeddings.layout != torch.sparse_coo:
         raise ValueError("Query embeddings must be a sparse COO tensor")
 
+    if query_embeddings.ndim == 1:
+        query_embeddings = query_embeddings.unsqueeze(0)
+    elif query_embeddings.ndim != 2:
+        raise ValueError(f"Query embeddings must be a 1D or 2D sparse tensor, got {query_embeddings.ndim}D")
+
     if corpus_index is None:
         if corpus_embeddings is None:
             raise ValueError("Either corpus_embeddings or corpus_index must be provided")
@@ -127,15 +132,14 @@ def semantic_search_qdrant(
     search_start_time = time.time()
 
     # Process each query
+    query_embeddings = query_embeddings.coalesce()
+    query_indices = query_embeddings.indices().cpu().numpy()
+    query_values = query_embeddings.values().cpu().numpy()
     for q_idx in range(query_embeddings.size(0)):
         # Extract query vector
-        if query_embeddings.sparse_dim() == 1:
-            q_indices = query_embeddings.coalesce().indices()[0].cpu().numpy().tolist()
-            q_values = query_embeddings.coalesce().values().cpu().numpy().tolist()
-        else:
-            mask = query_embeddings.coalesce().indices()[0].cpu().numpy() == q_idx
-            q_indices = query_embeddings.coalesce().indices()[1][mask].cpu().numpy().tolist()
-            q_values = query_embeddings.coalesce().values()[mask].cpu().numpy().tolist()
+        mask = query_indices[0] == q_idx
+        q_indices = query_indices[1][mask].tolist()
+        q_values = query_values[mask].tolist()
 
         # Perform search
         search_results = client.query_points(
