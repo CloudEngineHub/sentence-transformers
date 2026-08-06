@@ -923,9 +923,10 @@ def mine_hard_negatives(
                 solutions.append("relative_margin")
             if max_score is not None:
                 solutions.append("max_score")
-            considerations = ", ".join(solutions[:-1])
             if len(solutions) > 1:
-                considerations += " and " + solutions[-1]
+                considerations = ", ".join(solutions[:-1]) + " and " + solutions[-1]
+            else:
+                considerations = solutions[0]
             missing_samples_ratio = missing_samples / maximum_possible_samples
             print(
                 f"Could not find enough negatives for {missing_samples} samples ({missing_samples_ratio:.2%})."

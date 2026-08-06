@@ -1735,3 +1735,20 @@ def test_range_max_larger_than_corpus_does_not_crash() -> None:
     positive_score, negative_score = row["scores"]
     assert positive_score == pytest.approx(-0.50)
     assert negative_score == pytest.approx(-0.49)
+
+
+def test_missing_negatives_message_names_range_max(capsys: pytest.CaptureFixture) -> None:
+    """With only range_max to suggest, the "Could not find enough negatives" message must still
+    name it instead of printing an empty parameter list."""
+    dataset = Dataset.from_dict({"query": ["q"], "positive": ["p"]})
+    mine_hard_negatives(
+        dataset=dataset,
+        model=ControlledNegativeScoreModel(),
+        anchor_column_name="query",
+        positive_column_name="positive",
+        corpus=["p", "n_more_similar", "n_far"],
+        num_negatives=5,
+        verbose=True,
+    )
+    captured = capsys.readouterr()
+    assert "Consider adjusting the range_max parameter if" in captured.out
