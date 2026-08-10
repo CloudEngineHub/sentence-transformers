@@ -59,6 +59,14 @@ class TestPoolShapeInvariants:
         pooling = HierarchicalTokenPooling(pool_factor=2)
         assert pooling.pool([]) == []
 
+    def test_task_outside_tasks_returns_input_unchanged(self) -> None:
+        # encode() delegates its per-call gating to this: with the default tasks (documents only),
+        # pool(task="query") must be an identity.
+        docs = [_normed((12, 8))]
+        pooling = HierarchicalTokenPooling(pool_factor=2)
+        assert pooling.pool(docs, task="query") is docs
+        assert isinstance(pooling.pool(docs, task="document"), list)
+
     def test_bad_input_type_raises(self) -> None:
         pooling = HierarchicalTokenPooling(pool_factor=2)
         with pytest.raises(ValueError, match="Tensor input must be 3D"):
@@ -218,8 +226,8 @@ class TestPipelineModuleForward:
         assert out["token_embeddings"] is embeddings  # unchanged reference
 
     def test_forward_pools_queries_when_opted_in(self) -> None:
-        # CRISP-style strategies compress queries too: pool_queries=True lifts the query gate.
-        pooling = HierarchicalTokenPooling(pool_factor=2, pool_queries=True)
+        # CRISP-style strategies compress queries too: listing "query" in tasks lifts the gate.
+        pooling = HierarchicalTokenPooling(pool_factor=2, tasks=["query", "document"])
         features = {
             "token_embeddings": _normed((2, 12, 8)),
             "attention_mask": torch.ones(2, 12, dtype=torch.bool),
@@ -272,7 +280,7 @@ class TestEncodeWithPooling:
         without = model.encode_query([text], convert_to_tensor=True)[0]
         pooled = model.encode_query(
             [text],
-            pooling=HierarchicalTokenPooling(pool_factor=2, pool_queries=True),
+            pooling=HierarchicalTokenPooling(pool_factor=2, tasks=["query", "document"]),
             convert_to_tensor=True,
         )[0]
         assert pooled.shape[0] < without.shape[0]
@@ -327,10 +335,14 @@ class TestConstructorValidation:
         with pytest.raises(ValueError, match="num_protected_tokens must be >= 0"):
             HierarchicalTokenPooling(num_protected_tokens=-1)
 
-    def test_pool_queries_round_trips_through_config(self, tmp_path) -> None:
-        HierarchicalTokenPooling(pool_factor=2, pool_queries=True).save(str(tmp_path))
+    def test_tasks_accepts_a_bare_string(self) -> None:
+        # Without the coercion, list("query") would silently split into characters.
+        assert HierarchicalTokenPooling(tasks="query").tasks == ["query"]
+
+    def test_tasks_round_trip_through_config(self, tmp_path) -> None:
+        HierarchicalTokenPooling(pool_factor=2, tasks=["query", "document"]).save(str(tmp_path))
         restored = HierarchicalTokenPooling.load(str(tmp_path))
-        assert restored.pool_queries is True
+        assert restored.tasks == ["query", "document"]
         assert restored.pool_factor == 2
 
 

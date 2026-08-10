@@ -934,9 +934,9 @@ class MultiVectorEncoder(BaseModel):
                 Defaults to False.
             pool (dict, optional): A multi-process pool created via :meth:`start_multi_process_pool`.
             chunk_size (int, optional): Chunk size for multi-process encoding.
-            pooling (BaseTokenPooling, optional): Per-call token pooling applied to document embeddings
-                after the pipeline. Skips queries unless the pooling was built with
-                ``pool_queries=True``. If the model already bakes a pooling into its pipeline, this
+            pooling (BaseTokenPooling, optional): Per-call token pooling applied after the pipeline
+                to embeddings whose ``task`` is in the pooling's ``tasks`` (by default only
+                documents). If the model already bakes a pooling into its pipeline, this
                 compounds on top of it (pooling further). A one-time note is logged so the case is
                 discoverable. With ``output_value=None``, applied to the raw dicts
                 (``token_embeddings`` and ``attention_mask`` are rewritten). Defaults to None.
@@ -1035,8 +1035,9 @@ class MultiVectorEncoder(BaseModel):
                 features = self(features, task=task)
                 if output_value is None:
                     # Unlike normalization and precision, pooling applies here, as ST's truncate_dim does.
-                    if pooling is not None and (not is_query or pooling.pool_queries):
-                        if any(isinstance(module, BaseTokenPooling) for module in self):
+                    # The pooling's own ``tasks`` gate decides whether this task is pooled.
+                    if pooling is not None:
+                        if pooling.applies_to(task) and any(isinstance(module, BaseTokenPooling) for module in self):
                             logger.warning_once(
                                 "This model already includes a token pooling in its pipeline: the per-call "
                                 "`pooling=` pools further on top of it (compounding). Omit it if you only want "
@@ -1062,16 +1063,17 @@ class MultiVectorEncoder(BaseModel):
                 if normalize_embeddings:
                     batch_embeddings = [nn.functional.normalize(emb, p=2, dim=-1) for emb in batch_embeddings]
 
-            # Per-call pooling. Skips queries unless pool_queries opts in. Compounds on top of any
-            # pooling baked into the pipeline (supported, but noted once in case it's unexpected).
-            if pooling is not None and (not is_query or pooling.pool_queries):
-                if any(isinstance(module, BaseTokenPooling) for module in self):
+            # Per-call pooling. The pooling's own ``tasks`` gate decides whether this task is
+            # pooled. Compounds on top of any pooling baked into the pipeline (supported, but
+            # noted once in case it's unexpected).
+            if pooling is not None:
+                if pooling.applies_to(task) and any(isinstance(module, BaseTokenPooling) for module in self):
                     logger.warning_once(
                         "This model already includes a token pooling in its pipeline: the per-call "
                         "`pooling=` pools further on top of it (compounding). Omit it if you only want "
                         "the model's built-in pooling."
                     )
-                batch_embeddings = pooling.pool(batch_embeddings)
+                batch_embeddings = pooling.pool(batch_embeddings, task=task)
 
             if convert_to_numpy:
                 batch_embeddings = [emb.cpu() for emb in batch_embeddings]

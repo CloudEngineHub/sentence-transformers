@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from typing import overload
 
 import numpy as np
 import torch
@@ -71,20 +72,28 @@ class BaseTokenPooling(Module, ABC):
     apply a pooling (pipeline module, per-call ``pooling=`` kwarg, standalone :meth:`pool`).
 
     Args:
-        pool_queries: Also pool query embeddings. Defaults to False (ColBERT-style: only compress
-            the document index). Set to True for strategies that compress queries too, e.g.
-            CRISP-style fixed-k query clustering.
+        tasks: Task names this pooling applies to. A single string counts as a one-element list.
+            Inputs encoded for any other task pass through unchanged. Defaults to ``["document"]``
+            (ColBERT-style: only compress the document index). Use ``["query", "document"]`` for
+            strategies that compress queries too, e.g. CRISP-style fixed-k clustering. Inputs
+            encoded without a task count as ``"document"``.
     """
 
-    config_keys: list[str] = ["pool_queries"]
+    config_keys: list[str] = ["tasks"]
     forward_kwargs: set[str] = {"task"}
 
-    def __init__(self, pool_queries: bool = False) -> None:
+    def __init__(self, tasks: str | list[str] | None = None) -> None:
         super().__init__()
-        self.pool_queries = pool_queries
+        if isinstance(tasks, str):
+            tasks = [tasks]
+        self.tasks: list[str] = list(tasks) if tasks is not None else ["document"]
+
+    def applies_to(self, task: str | None) -> bool:
+        """Whether this pooling applies to inputs encoded for ``task`` (``None`` counts as ``"document"``)."""
+        return (task or "document") in self.tasks
 
     def forward(self, features: dict[str, Tensor], task: str | None = None) -> dict[str, Tensor]:
-        if task == "query" and not self.pool_queries:
+        if not self.applies_to(task):
             return features
         token_embeddings = features["token_embeddings"]
         attention_mask = features["attention_mask"].bool()
@@ -102,10 +111,31 @@ class BaseTokenPooling(Module, ABC):
         features["attention_mask"] = new_mask
         return features
 
+    @overload
+    def pool(
+        self,
+        embeddings: list[Tensor],
+        *,
+        task: str | None = ...,
+        attention_mask: Tensor | None = ...,
+        padding_side: str = ...,
+    ) -> list[Tensor]: ...
+
+    @overload
+    def pool(
+        self,
+        embeddings: Tensor,
+        *,
+        task: str | None = ...,
+        attention_mask: Tensor | None = ...,
+        padding_side: str = ...,
+    ) -> Tensor: ...
+
     def pool(
         self,
         embeddings: list[Tensor] | Tensor,
         *,
+        task: str | None = None,
         attention_mask: Tensor | None = None,
         padding_side: str = "right",
     ) -> list[Tensor] | Tensor:
@@ -113,6 +143,11 @@ class BaseTokenPooling(Module, ABC):
 
         Args:
             embeddings: A list of ``(t_i, D)`` tensors, or a 3D ``(B, T, D)`` padded tensor.
+            task: Task the embeddings were encoded for. If it is not in :attr:`tasks`, the input
+                is returned unchanged. ``None`` (default) counts as ``"document"``, so standalone
+                document compression needs no extra argument.
+                :meth:`~sentence_transformers.MultiVectorEncoder.encode` forwards its ``task``
+                here for per-call pooling.
             attention_mask: Optional ``(B, T)`` boolean mask for the 3D case. Required unless
                 the padding is zero-valued (in which case the input boundary is detected by
                 ``padding_side``, but a real token whose embedding is exactly zero at the
@@ -124,6 +159,8 @@ class BaseTokenPooling(Module, ABC):
             List of ``(num_out, D)`` tensors when the input was a list. A padded 3D tensor
             when the input was 3D (padded on ``padding_side``).
         """
+        if not self.applies_to(task):
+            return embeddings
         if isinstance(embeddings, Tensor):
             if embeddings.ndim != 3:
                 raise ValueError(f"Tensor input must be 3D (B, T, D); got shape {tuple(embeddings.shape)}.")
@@ -203,13 +240,16 @@ class HierarchicalTokenPooling(BaseTokenPooling):
             disables pooling (the module becomes a no-op).
         num_protected_tokens: Leading tokens excluded from pooling (typically ``[CLS]``). Default 1.
             colpali-engine has no protected-token concept: use ``0`` when matching its setup.
-        pool_queries: Also pool query embeddings. Defaults to False (only compress documents).
+        tasks: Task names this pooling applies to. Defaults to ``["document"]`` (only compress
+            documents).
     """
 
-    config_keys: list[str] = ["pool_factor", "num_protected_tokens", "pool_queries"]
+    config_keys: list[str] = ["pool_factor", "num_protected_tokens", "tasks"]
 
-    def __init__(self, pool_factor: int = 1, num_protected_tokens: int = 1, pool_queries: bool = False) -> None:
-        super().__init__(pool_queries=pool_queries)
+    def __init__(
+        self, pool_factor: int = 1, num_protected_tokens: int = 1, tasks: str | list[str] | None = None
+    ) -> None:
+        super().__init__(tasks=tasks)
         if pool_factor < 1:
             raise ValueError(f"pool_factor must be >= 1, got {pool_factor}.")
         if num_protected_tokens < 0:
@@ -250,8 +290,8 @@ class LambdaTokenPooling(BaseTokenPooling):
         pooled = pooling.pool(document_embeddings)
     """
 
-    def __init__(self, pool_fn: Callable[[Tensor], Tensor], pool_queries: bool = False) -> None:
-        super().__init__(pool_queries=pool_queries)
+    def __init__(self, pool_fn: Callable[[Tensor], Tensor], tasks: str | list[str] | None = None) -> None:
+        super().__init__(tasks=tasks)
         self.pool_fn = pool_fn
 
     def pool_one(self, embedding: Tensor, **kwargs) -> Tensor:

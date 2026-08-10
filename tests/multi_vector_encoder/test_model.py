@@ -1107,6 +1107,21 @@ def test_encode_pooling_compounds_and_notes_when_module_present(caplog) -> None:
     assert any("compounding" in record.message for record in caplog.records)
 
 
+def test_encode_pooling_note_skipped_for_unpooled_tasks(caplog) -> None:
+    """A per-call pooling whose ``tasks`` gate skips this call must not log the compounding note,
+    nor burn the warning_once for a later call that genuinely compounds."""
+    pooled_model = MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
+    pooled_model.append(HierarchicalTokenPooling(pool_factor=2))
+
+    with caplog.at_level("WARNING"):
+        pooled_model.encode_query("a fairly long query", pooling=HierarchicalTokenPooling(pool_factor=2))
+    assert not any("compounding" in record.message for record in caplog.records)
+
+    with caplog.at_level("WARNING"):
+        pooled_model.encode_document(["a fairly long document"], pooling=HierarchicalTokenPooling(pool_factor=2))
+    assert any("compounding" in record.message for record in caplog.records)
+
+
 def test_encode_pooling_applies_to_raw_output(model: MultiVectorEncoder) -> None:
     # Per-call transforms also apply to raw output, like ST's truncate_dim. The pooling module's
     # forward slices each row by its mask before clustering, so batch padding never reaches the
@@ -1129,13 +1144,13 @@ def test_encode_pooling_applies_to_raw_output(model: MultiVectorEncoder) -> None
 
 
 def test_encode_pooling_skips_queries_on_raw_output(model: MultiVectorEncoder) -> None:
-    # The raw path gates queries twice, on encode's ``is_query`` and on the module forward's
-    # ``task``, so both sides of the gate are pinned here.
+    # encode delegates the task gate to the pooling itself: default tasks skip queries, listing
+    # "query" pools them.
     query = "a fairly long query with plenty of distinct tokens to cluster together here"
     unpooled = model.encode_query(query, output_value=None)["token_embeddings"]
     skipped = model.encode_query(query, output_value=None, pooling=HierarchicalTokenPooling(pool_factor=2))
     opted_in = model.encode_query(
-        query, output_value=None, pooling=HierarchicalTokenPooling(pool_factor=2, pool_queries=True)
+        query, output_value=None, pooling=HierarchicalTokenPooling(pool_factor=2, tasks=["query", "document"])
     )
     assert skipped["token_embeddings"].shape == unpooled.shape
     assert opted_in["token_embeddings"].shape[0] < unpooled.shape[0]
