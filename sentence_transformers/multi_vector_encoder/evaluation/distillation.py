@@ -3,13 +3,14 @@ from __future__ import annotations
 import csv
 import logging
 import os
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
 import torch
 from scipy.stats import spearmanr
 
 from sentence_transformers.base.evaluation.evaluator import BaseEvaluator
+from sentence_transformers.util import similarity_fct_name
 
 if TYPE_CHECKING:
     from sentence_transformers.base.modality_types import SingleInput
@@ -27,14 +28,14 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
       :class:`~sentence_transformers.multi_vector_encoder.losses.MultiVectorDistillKLDivLoss` and
       PyLate): ``documents`` is a list of N-way candidate lists per query and ``scores`` the matching
       2-D teacher scores. Both metrics are computed per query, so they track the training loss: the KL
-      divergence over each query's own candidate set (with the same optional min-max normalization and
-      ``temperature`` handling as the loss, averaged over queries, so with the loss's temperature the
-      reported KL matches the training loss) and the Spearman as the mean of the per-query rank
-      correlations.
+      divergence over each query's own candidate set (with the same temperature handling as the loss,
+      averaged over queries, so with the loss's temperatures, and its scoring mirrored via
+      ``similarity_fct`` when non-default, the reported KL matches the training loss) and the Spearman
+      as the mean of the per-query rank correlations.
     - **Flat pairs**: one document per query with 1-D scores. A per-query distribution or ranking is
       undefined here, so the KL softmaxes over the whole dataset as a single distribution and reports
       the full divergence (a sum over pairs, not divided by their number, and not comparable to the
-      per-query KL or to PyLate). ``temperature`` divides the scores the same way as on the per-query
+      per-query KL or to PyLate). The temperatures divide the scores the same way as on the per-query
       path. The Spearman is one global correlation over all pairs.
 
     Reported metrics:
@@ -55,12 +56,19 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
             across queries). Must have the same length as ``queries``.
         scores: Teacher scores: 1-D (one per pair) for flat documents, 2-D ``(num_queries, N)`` for
             candidate sets.
-        normalize_scores: Min-max normalize the student scores per query before the softmax, matching
-            ``MultiVectorDistillKLDivLoss``. Only used for per-query candidate sets. Defaults to True.
-        temperature: Temperature dividing the teacher scores and (normalized) student scores before
-            the softmax, with the KL scaled by ``temperature ** 2``, exactly as in
-            ``MultiVectorDistillKLDivLoss``. Set it to the training loss's temperature so the
-            per-query KL matches the training loss. Must be > 0. Defaults to 1.0.
+        temperature: Temperature dividing both the teacher and student scores before the softmax
+            unless overridden per side, with the KL scaled by the student temperature squared,
+            exactly as in ``MultiVectorDistillKLDivLoss``. Set it to the training loss's temperature
+            so the per-query KL matches the training loss. Must be > 0. Defaults to 1.0.
+        student_temperature: Student-side override of ``temperature``, mirroring the loss's parameter
+            of the same name. Must be > 0. Defaults to None.
+        teacher_temperature: Teacher-side override of ``temperature``, mirroring the loss's parameter
+            of the same name. Must be > 0. Defaults to None.
+        similarity_fct: Pairwise scoring callable replacing ``model.similarity_pairwise``, to mirror
+            a non-default training ``similarity_fct``: e.g. pass
+            ``functools.partial(colbert_scores_pairwise, length_normalize=True)`` when the loss uses
+            MeanMaxSim scoring, or the per-query KL cannot match the training loss. Defaults to None
+            (the model's own pairwise similarity).
         name: Optional run name appended to CSV filenames.
         batch_size: Batch size for encoding.
         show_progress_bar: Whether to show a progress bar.
@@ -99,8 +107,10 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
         queries: Sequence[SingleInput],
         documents: Sequence[SingleInput] | Sequence[Sequence[SingleInput]],
         scores: list[float] | list[list[float]] | torch.Tensor,
-        normalize_scores: bool = True,
         temperature: float = 1.0,
+        student_temperature: float | None = None,
+        teacher_temperature: float | None = None,
+        similarity_fct: Callable | None = None,
         name: str = "",
         batch_size: int = 16,
         show_progress_bar: bool = False,
@@ -135,10 +145,17 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
                     f"With one document per query, scores must be 1-D, got shape {tuple(self.scores.shape)}. "
                     "Pass documents as a list of per-query candidate lists to use 2-D scores."
                 )
-        if temperature <= 0:
-            raise ValueError(f"temperature must be > 0, got {temperature}.")
-        self.normalize_scores = normalize_scores
         self.temperature = temperature
+        self.student_temperature = student_temperature if student_temperature is not None else temperature
+        self.teacher_temperature = teacher_temperature if teacher_temperature is not None else temperature
+        for label, value in (
+            ("temperature", self.temperature),
+            ("student_temperature", self.student_temperature),
+            ("teacher_temperature", self.teacher_temperature),
+        ):
+            if value <= 0:
+                raise ValueError(f"{label} must be > 0, got {value}.")
+        self.similarity_fct = similarity_fct
         self.name = name
         self.batch_size = batch_size
         self.show_progress_bar = show_progress_bar
@@ -177,19 +194,13 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
             )
             # Regroup per way and score pairwise with the model's own similarity, giving the same
             # (num_queries, n_ways) student scores as the KD loss computes at training time.
-            pairwise = model.similarity_pairwise
+            pairwise = self.similarity_fct if self.similarity_fct is not None else model.similarity_pairwise
             student_scores = torch.stack(
                 [pairwise(query_embeddings, flat_doc_embeddings[way::n_ways]).cpu() for way in range(n_ways)],
                 dim=1,
             )
-            student_logits = student_scores
-            if self.normalize_scores:
-                # Same per-query min-max as MultiVectorDistillKLDivLoss.
-                max_scores = student_logits.max(dim=1, keepdim=True).values
-                min_scores = student_logits.min(dim=1, keepdim=True).values
-                student_logits = (student_logits - min_scores) / (max_scores - min_scores + 1e-8)
-            teacher_log_probs = torch.log_softmax(self.scores / self.temperature, dim=-1)
-            student_log_probs = torch.log_softmax(student_logits / self.temperature, dim=-1)
+            teacher_log_probs = torch.log_softmax(self.scores / self.teacher_temperature, dim=-1)
+            student_log_probs = torch.log_softmax(student_scores / self.student_temperature, dim=-1)
         else:
             doc_embeddings = model.encode_document(
                 self.documents,
@@ -197,17 +208,18 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
                 show_progress_bar=self.show_progress_bar,
                 convert_to_tensor=True,
             )
-            student_scores = model.similarity_pairwise(query_embeddings, doc_embeddings).cpu()
+            pairwise = self.similarity_fct if self.similarity_fct is not None else model.similarity_pairwise
+            student_scores = pairwise(query_embeddings, doc_embeddings).cpu()
             # One document per query: a per-query distribution is undefined, so this softmaxes over
             # the whole dataset (a single global distribution). Not comparable to the per-query KL.
-            teacher_log_probs = torch.log_softmax(self.scores / self.temperature, dim=-1)
-            student_log_probs = torch.log_softmax(student_scores / self.temperature, dim=-1)
+            teacher_log_probs = torch.log_softmax(self.scores / self.teacher_temperature, dim=-1)
+            student_log_probs = torch.log_softmax(student_scores / self.student_temperature, dim=-1)
 
         # batchmean averages the per-query KL over queries. On the flat path it would divide the
         # single global KL by the number of pairs, so report the full sum there instead.
         reduction = "batchmean" if self.nested_documents else "sum"
         kl = torch.nn.functional.kl_div(student_log_probs, teacher_log_probs, reduction=reduction, log_target=True)
-        kl = kl.item() * self.temperature**2
+        kl = kl.item() * self.student_temperature**2
         if self.nested_documents:
             # Rank within each query, matching the per-query KL above: absolute MaxSim scores are
             # not comparable across queries (see the class docstring).
@@ -245,7 +257,10 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
         config_dict = {}
         if self.temperature != 1.0:
             config_dict["temperature"] = self.temperature
-        # normalize_scores does nothing on the flat path.
-        if self.nested_documents and not self.normalize_scores:
-            config_dict["normalize_scores"] = self.normalize_scores
+        if self.student_temperature != self.temperature:
+            config_dict["student_temperature"] = self.student_temperature
+        if self.teacher_temperature != self.temperature:
+            config_dict["teacher_temperature"] = self.teacher_temperature
+        if self.similarity_fct is not None:
+            config_dict["similarity_fct"] = similarity_fct_name(self.similarity_fct)
         return config_dict

@@ -1006,3 +1006,23 @@ def test_maxsim_moves_masks_onto_the_scoring_device() -> None:
     pairwise = maxsim_pairwise(queries.cuda(), documents[:2].cuda(), a_mask=a_mask, b_mask=b_mask[:2])
     assert pairwise.device.type == "cuda"
     assert torch.allclose(pairwise.cpu(), expected_pairwise, atol=1e-5)
+
+
+def test_maxsim_length_normalize_divides_by_real_query_tokens() -> None:
+    """length_normalize (MeanMaxSim) divides each score by the count of real query tokens: item
+    lengths on the list path, mask sums on the padded path, identical in maxsim and maxsim_pairwise."""
+    generator = torch.Generator().manual_seed(3)
+    queries = [torch.randn(4, 8, generator=generator), torch.randn(9, 8, generator=generator)]
+    documents = [torch.randn(5, 8, generator=generator), torch.randn(7, 8, generator=generator)]
+    lens = torch.tensor([[4.0], [9.0]])
+
+    plain = maxsim(queries, documents)
+    assert torch.allclose(maxsim(queries, documents, length_normalize=True), plain / lens)
+
+    padded = torch.nn.utils.rnn.pad_sequence(queries, batch_first=True)
+    a_mask = torch.tensor([[True] * 4 + [False] * 5, [True] * 9])
+    assert torch.allclose(maxsim(padded, documents, a_mask=a_mask, length_normalize=True), plain / lens)
+
+    plain_pairwise = maxsim_pairwise(queries, documents)
+    mean_pairwise = maxsim_pairwise(queries, documents, length_normalize=True)
+    assert torch.allclose(mean_pairwise, plain_pairwise / lens.squeeze(1))

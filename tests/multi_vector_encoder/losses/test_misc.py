@@ -700,3 +700,49 @@ def test_margin_mse_accepts_xtr_pairwise_metric() -> None:
 
     default = mve_losses.MultiVectorMarginMSELoss(model=_PassthroughModel())
     assert default.get_config_dict()["similarity_fct"] == "colbert_scores_pairwise"
+
+
+def test_similarity_fct_config_renders_partial_bindings() -> None:
+    """A functools.partial similarity_fct (e.g. MeanMaxSim via length_normalize) serializes with its
+    bound settings, like configured metric objects do."""
+    from functools import partial
+
+    from sentence_transformers.multi_vector_encoder.scoring import colbert_scores
+
+    loss = mve_losses.MultiVectorMultipleNegativesRankingLoss(
+        model=_PassthroughModel(), similarity_fct=partial(colbert_scores, length_normalize=True)
+    )
+    assert loss.get_config_dict()["similarity_fct"] == "colbert_scores(length_normalize=True)"
+
+
+def test_distill_kl_div_separate_temperatures() -> None:
+    """student_temperature / teacher_temperature default to the shared temperature and split the two
+    softmaxes when set, with the loss scaled by the student temperature squared."""
+    batch, dim = 2, 8
+    labels = torch.tensor([[4.0, 1.0], [3.5, 0.5]])
+
+    def build_features() -> list[dict[str, Tensor]]:
+        return [
+            _make_feature(t_tokens=4, batch=batch, dim=dim, seed=1),
+            _make_feature(t_tokens=6, batch=batch, dim=dim, seed=2),
+            _make_feature(t_tokens=5, batch=batch, dim=dim, seed=3),
+        ]
+
+    shared = mve_losses.MultiVectorDistillKLDivLoss(model=_PassthroughModel(), temperature=0.5)
+    shared_value = shared(build_features(), labels).item()
+    aliased = mve_losses.MultiVectorDistillKLDivLoss(
+        model=_PassthroughModel(), student_temperature=0.5, teacher_temperature=0.5
+    )
+    assert aliased(build_features(), labels).item() == pytest.approx(shared_value)
+
+    split = mve_losses.MultiVectorDistillKLDivLoss(
+        model=_PassthroughModel(), student_temperature=0.5, teacher_temperature=2.0
+    )
+    assert split(build_features(), labels).item() != pytest.approx(shared_value)
+    assert split.get_config_dict() == {
+        "similarity_fct": "colbert_kd_scores",
+        "temperature": 1.0,
+        "student_temperature": 0.5,
+        "teacher_temperature": 2.0,
+        "mini_batch_size": None,
+    }

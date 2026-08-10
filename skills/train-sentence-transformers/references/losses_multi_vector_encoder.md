@@ -2,7 +2,7 @@
 
 All losses live in `sentence_transformers.multi_vector_encoder.losses`.
 
-Multi-vector models emit **one embedding per token** and score `(query, document)` via MaxSim (for each query token, take the max similarity to any document token, then sum across query tokens). This is fundamentally different from single-vector cosine, which changes what "temperature" means: MaxSim is an unbounded sum over query-token similarities, so bi-encoder scaling values like `scale=20.0` saturate the softmax here. **The default `scale=1.0` (temperature=1.0) is correct for MaxSim. Do not copy `scale=20.0` from bi-encoder MNRL.**
+Multi-vector models emit **one embedding per token** and score `(query, document)` via MaxSim (for each query token, take the max similarity to any document token, then sum across query tokens). This is fundamentally different from single-vector cosine, which changes what "temperature" means: MaxSim is an unbounded sum over query-token similarities, so for it a scale near 1.0 makes sense. **The default `scale=1.0` (temperature=1.0) is correct for unnormalized MaxSim: do not copy `scale=20.0` from bi-encoder MNRL.** With length-normalized MeanMaxSim scoring (`similarity_fct=partial(colbert_scores, length_normalize=True)`), scores are bounded like cosine and much larger scales apply, e.g. `scale=1000` (temperature 0.001).
 
 ## Top-line decision table
 
@@ -30,7 +30,7 @@ loss = MultiVectorMultipleNegativesRankingLoss(model=model)  # scale=1.0 (temper
 - **Data**: `(anchor, positive)` or `(anchor, positive, negative_1, ..., negative_n)`. The collator stamps each column's task (column 0 becomes query, others become document). Pass `task=...` on a column to override.
 - Set `batch_sampler=BatchSamplers.NO_DUPLICATES` on training args (same reason as bi-encoder MNRL).
 - `similarity_fct=colbert_scores` by default. Pass `XTRScores(top_k=...)` for the sparser XTR-style scoring (from `sentence_transformers.multi_vector_encoder.scoring`). XTR applies to training only: evaluation always scores with MaxSim (see Gotchas).
-- `scale=1.0` (temperature=1.0) matches PyLate and is correct for MaxSim. **Do NOT set `scale=20.0`**, which saturates the softmax and destroys learning.
+- `scale=1.0` (temperature=1.0) matches PyLate and is correct for unnormalized MaxSim. **Do NOT copy `scale=20.0` from bi-encoder MNRL.** With MeanMaxSim (`length_normalize=True`), raise the scale sharply instead (e.g. `scale=1000`).
 
 ### `CachedMultiVectorMultipleNegativesRankingLoss`
 
@@ -79,7 +79,7 @@ loss = MultiVectorDistillKLDivLoss(model=model)
 - **Data**: `(query, document_1, ..., document_N, scores)` where `scores` is a list of N teacher scores per row. One column per candidate document (the standard positional multi-column convention), and the label column must use a recognized name (`label`, `labels`, `score`, `scores`). `resolve_ids` expands a stored ID list into the numbered columns.
 - Stronger training signal than `MarginMSE` when you have full `N`-way teacher scores (not just positive/negative margins).
 - `similarity_fct` defaults to `colbert_kd_scores`, the listwise KD variant, not the `colbert_scores` used by the MNRL family. `XTRKDScores` is the XTR counterpart.
-- `temperature` softens both distributions before the softmax, and the loss is scaled by `temperature ** 2` so gradient magnitudes stay comparable across temperatures. `normalize_scores=True` min-max normalises the student scores along the `N` dimension first.
+- `temperature` softens both distributions before the softmax (override per side with `student_temperature` / `teacher_temperature`, e.g. 0.001 / 0.1 together with MeanMaxSim scoring via `similarity_fct=partial(colbert_kd_scores, length_normalize=True)`), and the loss is scaled by the student temperature squared so gradient magnitudes stay comparable across temperatures. That factor shrinks the loss by 1e-6 at `student_temperature=0.001`: when combining KD with a contrastive loss, scale the KD weight back up accordingly.
 - **OOM**: drop `per_device_train_batch_size` first and raise `gradient_accumulation_steps` to hold the effective batch. Only reduce `N` (candidate-list length) as a last resort, since lowering N changes the experiment.
 
 ## Data-shape gotchas
@@ -90,7 +90,7 @@ loss = MultiVectorDistillKLDivLoss(model=model)
 
 ## Gotchas
 
-- **`scale=20.0` copied from bi-encoder MNRL**: saturates the MaxSim softmax so the loss stays stuck and gradients vanish. Keep `scale=1.0`.
+- **`scale=20.0` copied from bi-encoder MNRL**: misscaled for the unnormalized MaxSim sum. Keep `scale=1.0` there, and use much larger scales only with length-normalized MeanMaxSim scoring.
 - **Missing `Normalize` at the token level in the pipeline**: `colbert_scores` assumes L2-normalized token embeddings. If your custom pipeline drops the token-level `Normalize`, either add one or pass `normalize_embeddings=True` semantics via a wrapper.
 - **`CachedMultiVectorMultipleNegativesRankingLoss` + `gradient_checkpointing=True`**: crash. Pick one.
 - **`MultiVectorMarginMSELoss` without precomputed `score_diff`**: label column must be populated from a teacher pass ahead of training. The loss does not compute the teacher inline.

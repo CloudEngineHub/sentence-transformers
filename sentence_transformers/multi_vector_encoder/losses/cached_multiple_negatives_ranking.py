@@ -23,6 +23,7 @@ from sentence_transformers.util import (
     all_gather_padded,
     cat_padded_token_embeddings,
     get_rank,
+    similarity_fct_name,
     stack_padded_token_embeddings,
 )
 
@@ -41,10 +42,13 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
     Args:
         model: A :class:`~sentence_transformers.MultiVectorEncoder`.
         scale: ``1 / temperature``. Scores are multiplied by ``scale`` before cross-entropy. Defaults to
-            ``1.0`` (``temperature=1.0``), matching PyLate. MaxSim is an unbounded sum over query-token
-            similarities, so (unlike bounded cosine, where the dense loss uses ``scale=20.0``) it needs no
-            amplification. ``scale=20`` would saturate the softmax. See
-            :class:`MultiVectorMultipleNegativesRankingLoss` for the full rationale.
+            ``1.0`` (``temperature=1.0``). Unlike cosine similarity (bounded to ``[-1, 1]``, where ST's
+            dense :class:`~sentence_transformers.losses.MultipleNegativesRankingLoss` uses ``scale=20.0``
+            to amplify the narrow range), MaxSim is an unbounded sum over query-token similarities (range
+            ``~[0, num_query_tokens]``), so a scale near ``1.0`` makes sense, the same reason the dense
+            loss recommends ``scale=1`` for dot-product similarity. With length-normalized scoring
+            (``functools.partial(colbert_scores, length_normalize=True)``, a.k.a. MeanMaxSim), scores are
+            bounded like cosine again and a much larger scale is appropriate, e.g. ``scale=1000``.
         similarity_fct: Scoring callable. Defaults to
             :func:`~sentence_transformers.multi_vector_encoder.scoring.colbert_scores`. Pass
             :class:`~sentence_transformers.multi_vector_encoder.scoring.XTRScores` for XTR-style scoring.
@@ -123,15 +127,9 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
         self.show_progress_bar = show_progress_bar
 
     def get_config_dict(self) -> dict[str, Any]:
-        similarity_fct = getattr(self.similarity_fct, "__name__", type(self.similarity_fct).__name__)
-        # Configured metric objects (e.g. XTRScores) expose their own config, include it.
-        metric_config = getattr(self.similarity_fct, "get_config_dict", None)
-        if metric_config is not None:
-            args = ", ".join(f"{key}={value!r}" for key, value in metric_config().items())
-            similarity_fct = f"{similarity_fct}({args})"
         return {
             "scale": self.scale,
-            "similarity_fct": similarity_fct,
+            "similarity_fct": similarity_fct_name(self.similarity_fct),
             "mini_batch_size": self.mini_batch_size,
             "mini_batch_num_tokens": self.mini_batch_num_tokens,
             "score_mini_batch_size": self.score_mini_batch_size,

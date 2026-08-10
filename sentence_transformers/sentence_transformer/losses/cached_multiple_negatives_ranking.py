@@ -7,8 +7,6 @@ import torch
 import tqdm
 from torch import Tensor, nn
 
-from sentence_transformers import util
-
 # RandContext and the mini-batching helpers historically lived in this module, so keep them importable.
 from sentence_transformers.base.losses.gradcache import (  # noqa: F401
     CachedLossMixin,
@@ -22,7 +20,7 @@ from sentence_transformers.sentence_transformer.losses.multiple_negatives_rankin
     MultipleNegativesRankingLoss,
 )
 from sentence_transformers.sentence_transformer.model import SentenceTransformer
-from sentence_transformers.util import all_gather_with_grad, get_rank
+from sentence_transformers.util import all_gather_with_grad, cos_sim, get_rank, similarity_fct_name
 
 
 class CachedMultipleNegativesRankingLoss(CachedLossMixin, nn.Module):
@@ -30,7 +28,7 @@ class CachedMultipleNegativesRankingLoss(CachedLossMixin, nn.Module):
         self,
         model: SentenceTransformer,
         scale: float = 20.0,
-        similarity_fct: Callable[[Tensor, Tensor], Tensor] = util.cos_sim,
+        similarity_fct: Callable[[Tensor, Tensor], Tensor] = cos_sim,
         mini_batch_size: int = 32,
         mini_batch_num_tokens: int | None = None,
         gather_across_devices: bool = False,
@@ -382,7 +380,7 @@ class CachedMultipleNegativesRankingLoss(CachedLossMixin, nn.Module):
     def get_config_dict(self) -> dict[str, Any]:
         return {
             "scale": self.scale,
-            "similarity_fct": getattr(self.similarity_fct, "__name__", str(self.similarity_fct)),
+            "similarity_fct": similarity_fct_name(self.similarity_fct),
             "mini_batch_size": self.mini_batch_size,
             "mini_batch_num_tokens": self.mini_batch_num_tokens,
             "gather_across_devices": self.gather_across_devices,

@@ -3,14 +3,13 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from typing import Any
 
-import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
 from sentence_transformers.base.losses.merged_forward import embed_columns_padded
 from sentence_transformers.multi_vector_encoder.model import MultiVectorEncoder
 from sentence_transformers.multi_vector_encoder.scoring import colbert_kd_scores
-from sentence_transformers.util import stack_padded_token_embeddings
+from sentence_transformers.util import similarity_fct_name, stack_padded_token_embeddings
 
 
 class MultiVectorDistillKLDivLoss(nn.Module):
@@ -34,12 +33,18 @@ class MultiVectorDistillKLDivLoss(nn.Module):
             ``(Q, N, d_tokens, dim)``, returns ``(Q, N)`` scores. Defaults to
             :func:`~sentence_transformers.multi_vector_encoder.scoring.colbert_kd_scores`. Pass
             :class:`~sentence_transformers.multi_vector_encoder.scoring.XTRKDScores` for XTR-style scoring.
-        normalize_scores: If True, min-max normalise the student scores along the ``N`` dimension before
-            softmaxing. Useful when student and teacher score ranges differ, but masks the absolute
-            magnitude. Defaults to True (matches PyLate).
-        temperature: Temperature applied to student / teacher logits before softmax. Defaults to ``1.0``.
-            The loss is multiplied by ``temperature ** 2`` to keep the gradient magnitude comparable across
-            temperatures (Hinton et al., 2015).
+        temperature: Temperature applied to both the student and teacher logits before softmax,
+            unless overridden per side. Defaults to ``1.0``. The loss is multiplied by the student
+            temperature squared to keep the gradient magnitude comparable across temperatures
+            (Hinton et al., 2015). A sharp student temperature therefore shrinks the reported loss
+            strongly (by 1e-6 at ``0.001``): when weighing this loss against another, scale the KD
+            weight back up accordingly.
+        student_temperature: Student-side override of ``temperature``. Distillation recipes pair a
+            sharp student temperature with a softer teacher one, e.g. ``0.001`` and ``0.1`` with
+            MeanMaxSim scoring (``functools.partial(colbert_kd_scores, length_normalize=True)``).
+            Defaults to None.
+        teacher_temperature: Teacher-side override of ``temperature``. Tune it to the teacher's
+            score scale. Defaults to None.
         mini_batch_size: Maximum number of rows per model forward. The merged
             ``batch_size * n_ways`` document batch is split into row chunks, each re-trimmed to its
             own longest document, so a single long outlier document only widens its own chunk.
@@ -79,31 +84,31 @@ class MultiVectorDistillKLDivLoss(nn.Module):
         self,
         model: MultiVectorEncoder,
         similarity_fct: Callable | None = None,
-        normalize_scores: bool = True,
         temperature: float = 1.0,
+        student_temperature: float | None = None,
+        teacher_temperature: float | None = None,
         mini_batch_size: int | None = None,
     ) -> None:
         super().__init__()
         self.model = model
         self.similarity_fct = similarity_fct if similarity_fct is not None else colbert_kd_scores
-        self.normalize_scores = normalize_scores
         self.temperature = temperature
+        self.student_temperature = student_temperature if student_temperature is not None else temperature
+        self.teacher_temperature = teacher_temperature if teacher_temperature is not None else temperature
         self.mini_batch_size = mini_batch_size
         self.loss_function = nn.KLDivLoss(reduction="batchmean", log_target=True)
 
     def get_config_dict(self) -> dict[str, Any]:
-        similarity_fct = getattr(self.similarity_fct, "__name__", type(self.similarity_fct).__name__)
-        # Configured metric objects (e.g. XTRKDScores) expose their own config, include it.
-        metric_config = getattr(self.similarity_fct, "get_config_dict", None)
-        if metric_config is not None:
-            args = ", ".join(f"{key}={value!r}" for key, value in metric_config().items())
-            similarity_fct = f"{similarity_fct}({args})"
-        return {
-            "similarity_fct": similarity_fct,
-            "normalize_scores": self.normalize_scores,
+        config: dict[str, Any] = {
+            "similarity_fct": similarity_fct_name(self.similarity_fct),
             "temperature": self.temperature,
-            "mini_batch_size": self.mini_batch_size,
         }
+        if self.student_temperature != self.temperature:
+            config["student_temperature"] = self.student_temperature
+        if self.teacher_temperature != self.temperature:
+            config["teacher_temperature"] = self.teacher_temperature
+        config["mini_batch_size"] = self.mini_batch_size
+        return config
 
     def forward(
         self,
@@ -145,15 +150,10 @@ class MultiVectorDistillKLDivLoss(nn.Module):
             documents_mask=documents_mask,
         )
 
-        if self.normalize_scores:
-            max_scores, _ = torch.max(scores, dim=1, keepdim=True)
-            min_scores, _ = torch.min(scores, dim=1, keepdim=True)
-            scores = (scores - min_scores) / (max_scores - min_scores + 1e-8)
-
-        student_log_probs = F.log_softmax(scores / self.temperature, dim=-1)
-        teacher_log_probs = F.log_softmax(labels / self.temperature, dim=-1)
+        student_log_probs = F.log_softmax(scores / self.student_temperature, dim=-1)
+        teacher_log_probs = F.log_softmax(labels / self.teacher_temperature, dim=-1)
         loss = self.loss_function(student_log_probs, teacher_log_probs)
-        return loss * (self.temperature**2)
+        return loss * (self.student_temperature**2)
 
     @property
     def citation(self) -> str:

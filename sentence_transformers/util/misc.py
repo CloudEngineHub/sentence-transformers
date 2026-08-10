@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import csv
+import functools
 import importlib
 import logging
 import os
 import warnings
+from collections.abc import Callable
 from contextlib import contextmanager
 from inspect import isclass
 
@@ -35,6 +37,22 @@ def fullname(obj) -> str:
     if module is None or module == str.__class__.__module__:
         return obj.__name__  # Avoid reporting __builtin__
     return module + "." + obj.__name__
+
+
+def similarity_fct_name(similarity_fct: Callable) -> str:
+    """Readable config-dict rendering of a loss's scoring callable: objects exposing
+    ``get_config_dict`` (e.g. configured metric classes) and :func:`functools.partial` bindings
+    include their settings."""
+    if isinstance(similarity_fct, functools.partial):
+        name = getattr(similarity_fct.func, "__name__", type(similarity_fct.func).__name__)
+        args = ", ".join(f"{key}={value!r}" for key, value in similarity_fct.keywords.items())
+        return f"{name}({args})" if args else name
+    name = getattr(similarity_fct, "__name__", type(similarity_fct).__name__)
+    metric_config = getattr(similarity_fct, "get_config_dict", None)
+    if metric_config is not None:
+        args = ", ".join(f"{key}={value!r}" for key, value in metric_config().items())
+        return f"{name}({args})"
+    return name
 
 
 def import_from_string(dotted_path: str) -> type:

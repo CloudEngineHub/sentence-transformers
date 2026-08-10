@@ -13,6 +13,7 @@ from sentence_transformers.multi_vector_encoder.scoring import colbert_scores
 from sentence_transformers.util import (
     all_gather_padded,
     get_rank,
+    similarity_fct_name,
     stack_padded_token_embeddings,
 )
 
@@ -32,9 +33,10 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
             ``1.0`` (``temperature=1.0``), matching PyLate. Unlike cosine similarity (bounded to
             ``[-1, 1]``, where ST's dense :class:`~sentence_transformers.losses.MultipleNegativesRankingLoss`
             uses ``scale=20.0`` to amplify the narrow range), MaxSim is an unbounded sum over query-token
-            similarities (range ``~[0, num_query_tokens]``), so it needs no amplification. This is the same
-            reason the dense loss recommends ``scale=1`` for dot-product similarity. ``scale=20`` here would
-            saturate the softmax and kill gradients.
+            similarities (range ``~[0, num_query_tokens]``), so a scale near ``1.0`` makes sense, the same
+            reason the dense loss recommends ``scale=1`` for dot-product similarity. With length-normalized
+            scoring (``functools.partial(colbert_scores, length_normalize=True)``, a.k.a. MeanMaxSim), scores are
+            bounded like cosine again and a much larger scale is appropriate, e.g. ``scale=1000``.
         similarity_fct: Scoring callable. Receives queries ``(Q, q_tokens, dim)`` and stacked documents
             ``(Q, N, d_tokens, dim)`` and returns ``(Q, Q*N)`` with query-major ordering. Defaults to
             :func:`~sentence_transformers.multi_vector_encoder.scoring.colbert_scores`. Pass
@@ -109,15 +111,9 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
         self.gather_across_devices = gather_across_devices
 
     def get_config_dict(self) -> dict[str, Any]:
-        similarity_fct = getattr(self.similarity_fct, "__name__", type(self.similarity_fct).__name__)
-        # Configured metric objects (e.g. XTRScores) expose their own config, include it.
-        metric_config = getattr(self.similarity_fct, "get_config_dict", None)
-        if metric_config is not None:
-            args = ", ".join(f"{key}={value!r}" for key, value in metric_config().items())
-            similarity_fct = f"{similarity_fct}({args})"
         return {
             "scale": self.scale,
-            "similarity_fct": similarity_fct,
+            "similarity_fct": similarity_fct_name(self.similarity_fct),
             "mini_batch_size": self.mini_batch_size,
             "score_mini_batch_size": self.score_mini_batch_size,
             "gather_across_devices": self.gather_across_devices,

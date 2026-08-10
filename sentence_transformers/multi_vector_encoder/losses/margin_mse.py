@@ -9,6 +9,7 @@ from torch import Tensor, nn
 from sentence_transformers.base.losses.merged_forward import embed_columns_padded
 from sentence_transformers.multi_vector_encoder.model import MultiVectorEncoder
 from sentence_transformers.multi_vector_encoder.scoring import colbert_scores_pairwise
+from sentence_transformers.util import similarity_fct_name
 
 
 class MultiVectorMarginMSELoss(nn.Module):
@@ -82,14 +83,8 @@ class MultiVectorMarginMSELoss(nn.Module):
         self.loss_function = nn.MSELoss()
 
     def get_config_dict(self) -> dict[str, Any]:
-        similarity_fct = getattr(self.similarity_fct, "__name__", type(self.similarity_fct).__name__)
-        # Configured metric objects expose their own config, include it.
-        metric_config = getattr(self.similarity_fct, "get_config_dict", None)
-        if metric_config is not None:
-            args = ", ".join(f"{key}={value!r}" for key, value in metric_config().items())
-            similarity_fct = f"{similarity_fct}({args})"
         return {
-            "similarity_fct": similarity_fct,
+            "similarity_fct": similarity_fct_name(self.similarity_fct),
             "mini_batch_size": self.mini_batch_size,
         }
 

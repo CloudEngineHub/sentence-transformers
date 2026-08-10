@@ -156,8 +156,9 @@ def main() -> None:
     logging.info(f"  train: {len(train_dataset):,} examples")
     logging.info(f"  eval:  {len(eval_dataset):,} examples")
 
-    # MNRL with in-batch negatives + explicit hard negatives. scale=1.0 (default) is correct for MaxSim.
-    # Do NOT copy scale=20.0 from bi-encoder MNRL, which saturates the softmax and destroys learning.
+    # MNRL with in-batch negatives + explicit hard negatives. scale=1.0 (default) is correct for
+    # unnormalized MaxSim: do not copy scale=20.0 from bi-encoder MNRL. Length-normalized MeanMaxSim
+    # scoring instead wants much larger scales.
     loss = MultiVectorMultipleNegativesRankingLoss(model=model)
 
     # Cheap in-training evaluator on 3 datasets (drives `load_best_model_at_end`).

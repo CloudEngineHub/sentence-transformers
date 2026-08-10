@@ -43,7 +43,7 @@ Tiebreakers when the request is ambiguous: "embedding model" / "vector search" /
 - `scripts/train_sparse_encoder_example.py`: production template. Copy this as your starting point.
 
 **[MultiVectorEncoder]**
-- `references/losses_multi_vector_encoder.md`: MaxSim scoring, `scale=1.0` default (never `scale=20.0`), MNRL / CachedMNRL / MarginMSE / DistillKLDiv, XTR-vs-ColBERT scoring, CachedMNRL ↔ `gradient_checkpointing` incompatibility.
+- `references/losses_multi_vector_encoder.md`: MaxSim scoring, scale choice per scoring mode (`scale=1.0` for MaxSim, much larger for MeanMaxSim), MNRL / CachedMNRL / MarginMSE / DistillKLDiv, XTR-vs-ColBERT scoring, CachedMNRL ↔ `gradient_checkpointing` incompatibility.
 - `references/evaluators_multi_vector_encoder.md`: `MultiVectorNanoBEIREvaluator` (English-only) and the in-domain alternative, `eval_NanoBEIR_mean_maxsim_ndcg@10` key format, distillation-eval spearman variant.
 - `scripts/train_multi_vector_encoder_example.py`: production template. Copy this as your starting point.
 
@@ -85,7 +85,7 @@ These are non-negotiable contracts. Implementation lives in the production templ
 - Smoke-test before any long run (`max_steps=1` + tiny dataset slice). The production templates show one common pattern (`SMOKE_TEST` env var).
 - **[CrossEncoder]** Include `EarlyStoppingCallback(patience>=3)`. CE rerankers often peak mid-training and regress.
 - **[SparseEncoder]** Log `query_active_dims` / `corpus_active_dims` on the verdict line. High nDCG with collapsed sparsity is not a win. The keys come back name-prefixed (e.g. `..._query_active_dims`). Use suffix matching to pluck them. See the SPARSE production template for the exact pattern.
-- **[MultiVectorEncoder]** Keep `scale=1.0` on any MNRL-family loss. MaxSim is unbounded, so `scale=20.0` copied from bi-encoder MNRL saturates the softmax and destroys learning. `XTRScores` is a train-only `similarity_fct`: the evaluators reject it, so evaluation always scores with MaxSim, including for XTR-trained models.
+- **[MultiVectorEncoder]** Match `scale` to the scoring mode on any MNRL-family loss: near `1.0` for unnormalized MaxSim (do not copy `scale=20.0` from bi-encoder MNRL), much larger with length-normalized MeanMaxSim (e.g. `scale=1000`). `XTRScores` is a train-only `similarity_fct`: the evaluators reject it, so evaluation always scores with MaxSim, including for XTR-trained models.
 
 ## 5. Workflow
 

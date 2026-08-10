@@ -22,6 +22,7 @@ from .misc import (
     fullname,
     import_from_string,
     import_module_class,
+    similarity_fct_name,
 )
 from .quantization import quantize_embeddings
 from .retrieval import (
@@ -88,6 +89,7 @@ __all__ = [
     "install_logger",
     # From misc.py
     "fullname",
+    "similarity_fct_name",
     "import_from_string",
     "import_module_class",
     "disable_datasets_caching",

@@ -338,8 +338,11 @@ def test_distillation_evaluator_spearman_skips_constant_queries(model: MultiVect
 
 def test_distillation_evaluator_temperature_matches_training_loss(model: MultiVectorEncoder) -> None:
     """The nested-path KL equals what MultiVectorDistillKLDivLoss reports for the same queries,
-    documents and teacher scores, at the evaluator's own ``temperature``."""
+    documents and teacher scores, for shared, per-side, and MeanMaxSim-mirrored settings alike."""
+    from functools import partial
+
     from sentence_transformers.multi_vector_encoder.losses import MultiVectorDistillKLDivLoss
+    from sentence_transformers.multi_vector_encoder.scoring import colbert_kd_scores, colbert_scores_pairwise
 
     queries = ["What is the capital of France?", "Who painted the Mona Lisa?"]
     documents = [
@@ -356,12 +359,25 @@ def test_distillation_evaluator_temperature_matches_training_loss(model: MultiVe
             for key, value in features.items()
         }
 
-    kl_by_temperature = {}
-    for value in (1.0, temperature):
+    kl_by_config = {}
+    configs = {
+        "default": ({}, {}),
+        "shared": ({"temperature": temperature}, {"temperature": temperature}),
+        "split": (
+            {"student_temperature": 0.05, "teacher_temperature": 0.5},
+            {"student_temperature": 0.05, "teacher_temperature": 0.5},
+        ),
+        # A non-default training similarity_fct mirrors via the matching pairwise scorer.
+        "mean_maxsim": (
+            {"similarity_fct": partial(colbert_kd_scores, length_normalize=True)},
+            {"similarity_fct": partial(colbert_scores_pairwise, length_normalize=True)},
+        ),
+    }
+    for label, (loss_kwargs, evaluator_kwargs) in configs.items():
         # Rebuilt per iteration: the loss forward rewrites the attention masks of its features.
         features = [tokenize(queries, "query")]
         features += [tokenize([row[way] for row in documents], "document") for way in range(len(documents[0]))]
-        loss = MultiVectorDistillKLDivLoss(model=model, temperature=value)
+        loss = MultiVectorDistillKLDivLoss(model=model, **loss_kwargs)
         with torch.no_grad():
             expected = loss(features, teacher_scores.to(model.device)).item()
 
@@ -369,13 +385,13 @@ def test_distillation_evaluator_temperature_matches_training_loss(model: MultiVe
             queries=queries,
             documents=documents,
             scores=teacher_scores.tolist(),
-            temperature=value,
             name="distill_temp",
             write_csv=False,
+            **evaluator_kwargs,
         )
-        kl_by_temperature[value] = evaluator(model)["distill_temp_kl_divergence"]
-        assert kl_by_temperature[value] == pytest.approx(expected, rel=1e-3)
-    assert kl_by_temperature[1.0] != pytest.approx(kl_by_temperature[temperature], rel=1e-3)
+        kl_by_config[label] = evaluator(model)["distill_temp_kl_divergence"]
+        assert kl_by_config[label] == pytest.approx(expected, rel=1e-3)
+    assert len({round(value, 6) for value in kl_by_config.values()}) == len(configs)
 
 
 def test_distillation_evaluator_flat_kl_is_full_sum(model: MultiVectorEncoder) -> None:
@@ -408,22 +424,33 @@ def test_distillation_evaluator_flat_kl_is_full_sum(model: MultiVectorEncoder) -
 
 
 def test_distillation_evaluator_config_dict() -> None:
-    # Only non-default values reach the model card, and normalize_scores is inert on the flat path.
+    # Only non-default values reach the model card.
     default = MultiVectorDistillationEvaluator(queries=["q"], documents=[["d1", "d2"]], scores=[[1.0, 0.0]])
     assert default.get_config_dict() == {}
 
     nested = MultiVectorDistillationEvaluator(
-        queries=["q"], documents=[["d1", "d2"]], scores=[[1.0, 0.0]], temperature=0.25, normalize_scores=False
+        queries=["q"], documents=[["d1", "d2"]], scores=[[1.0, 0.0]], temperature=0.25, student_temperature=0.05
     )
-    assert nested.get_config_dict() == {"temperature": 0.25, "normalize_scores": False}
+    assert nested.get_config_dict() == {"temperature": 0.25, "student_temperature": 0.05}
 
-    flat = MultiVectorDistillationEvaluator(queries=["q"], documents=["d"], scores=[1.0], normalize_scores=False)
-    assert flat.get_config_dict() == {}
+    from functools import partial
+
+    from sentence_transformers.multi_vector_encoder.scoring import colbert_scores_pairwise
+
+    scored = MultiVectorDistillationEvaluator(
+        queries=["q"],
+        documents=["d"],
+        scores=[1.0],
+        similarity_fct=partial(colbert_scores_pairwise, length_normalize=True),
+    )
+    assert scored.get_config_dict() == {"similarity_fct": "colbert_scores_pairwise(length_normalize=True)"}
 
 
 def test_distillation_evaluator_rejects_non_positive_temperature() -> None:
     with pytest.raises(ValueError, match="temperature"):
         MultiVectorDistillationEvaluator(queries=["q"], documents=["d"], scores=[1.0], temperature=0.0)
+    with pytest.raises(ValueError, match="student_temperature"):
+        MultiVectorDistillationEvaluator(queries=["q"], documents=["d"], scores=[1.0], student_temperature=-1.0)
 
 
 def test_distillation_evaluator_rejects_mismatched_nested_shapes() -> None:

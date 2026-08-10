@@ -12,6 +12,7 @@ def colbert_kd_scores(
     documents_embeddings: list | np.ndarray | torch.Tensor,
     queries_mask: torch.Tensor | None = None,
     documents_mask: torch.Tensor | None = None,
+    length_normalize: bool = False,
 ) -> torch.Tensor:
     """Compute MaxSim scores for knowledge distillation.
 
@@ -26,6 +27,7 @@ def colbert_kd_scores(
         documents_embeddings: ``(batch_size, n_ways, d_tokens, dim)``.
         queries_mask: optional ``(batch_size, q_tokens)`` mask.
         documents_mask: optional ``(batch_size, n_ways, d_tokens)`` mask.
+        length_normalize: divide each score by the real query token count (MeanMaxSim). Defaults to False.
 
     Returns:
         ``(batch_size, n_ways)`` score tensor, float32 regardless of the input dtype.
@@ -44,6 +46,7 @@ def colbert_kd_scores(
                 documents_embeddings[:, j],
                 a_mask=queries_mask,
                 b_mask=documents_mask[:, j] if documents_mask is not None else None,
+                length_normalize=length_normalize,
             )
             for j in range(n_ways)
         ],
@@ -56,6 +59,7 @@ def colbert_scores_pairwise(
     documents_embeddings: list | np.ndarray | torch.Tensor,
     queries_mask: torch.Tensor | None = None,
     documents_mask: torch.Tensor | None = None,
+    length_normalize: bool = False,
 ) -> torch.Tensor:
     """Pairwise ColBERT (MaxSim) scoring for matched ``(query_i, document_i)`` pairs.
 
@@ -65,8 +69,15 @@ def colbert_scores_pairwise(
     package's keyword convention, interchangeable with
     :func:`~sentence_transformers.multi_vector_encoder.scoring.xtr_scores_pairwise` as the
     ``similarity_fct`` of :class:`~sentence_transformers.multi_vector_encoder.losses.MultiVectorMarginMSELoss`.
+    ``length_normalize=True`` divides each score by the real query token count (MeanMaxSim).
     """
-    return maxsim_pairwise(queries_embeddings, documents_embeddings, a_mask=queries_mask, b_mask=documents_mask)
+    return maxsim_pairwise(
+        queries_embeddings,
+        documents_embeddings,
+        a_mask=queries_mask,
+        b_mask=documents_mask,
+        length_normalize=length_normalize,
+    )
 
 
 def colbert_scores(
@@ -74,6 +85,7 @@ def colbert_scores(
     documents_embeddings: list | np.ndarray | torch.Tensor,
     queries_mask: torch.Tensor | None = None,
     documents_mask: torch.Tensor | None = None,
+    length_normalize: bool = False,
 ) -> torch.Tensor:
     """ColBERT (MaxSim) contrastive scoring for in-batch negatives.
 
@@ -87,6 +99,8 @@ def colbert_scores(
     intermediate is live at a time. Pass this as ``similarity_fct`` to a
     :mod:`~sentence_transformers.multi_vector_encoder.losses` loss (the default), or
     :func:`~sentence_transformers.multi_vector_encoder.scoring.xtr_scores` for XTR-style scoring.
+    ``length_normalize=True`` divides each score by the real query token count (MeanMaxSim), removing
+    the query-length dependence of the score scale.
     """
     queries_embeddings = _convert_to_tensor(queries_embeddings)
     documents_embeddings = _convert_to_tensor(documents_embeddings)
@@ -97,6 +111,7 @@ def colbert_scores(
             documents_embeddings[:, j],
             a_mask=queries_mask,
             b_mask=documents_mask[:, j] if documents_mask is not None else None,
+            length_normalize=length_normalize,
         )
         for j in range(N)
     ]

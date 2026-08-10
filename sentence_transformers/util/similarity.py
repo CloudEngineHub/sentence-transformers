@@ -354,12 +354,23 @@ def _embedding_dim(embeddings: list | np.ndarray | Tensor) -> int:
     return next((len(item[0]) for item in embeddings if len(item)), 1)
 
 
+def _query_token_counts(a: list | np.ndarray | Tensor, a_mask: Tensor | None) -> Tensor:
+    """Per-item count of real query tokens for MeanMaxSim scoring: the mask sum when a mask is
+    given, the item lengths for ragged lists, and the non-zero rows for padded tensors."""
+    if a_mask is not None:
+        return a_mask.bool().sum(dim=-1).clamp(min=1)
+    if isinstance(a, list):
+        return torch.tensor([max(len(item), 1) for item in a])
+    return _zero_row_mask(_convert_to_tensor(a)).bool().sum(dim=-1).clamp(min=1)
+
+
 def maxsim(
     a: list | np.ndarray | Tensor,
     b: list | np.ndarray | Tensor,
     a_mask: Tensor | None = None,
     b_mask: Tensor | None = None,
     document_chunk_elements: int | None = None,
+    length_normalize: bool = False,
 ) -> Tensor:
     """
     Computes the MaxSim (late-interaction) score between two collections of multi-vector embeddings.
@@ -390,6 +401,9 @@ def maxsim(
             applies a 100M-element budget (at most ~400 MB, half that in bf16 / fp16). With very large
             query batches that floor can still be big: shard queries externally if a single document
             exceeds memory.
+        length_normalize (bool, optional): Divide each score by the number of real (unmasked) query
+            tokens, yielding MeanMaxSim: scores land in the per-token similarity range (about
+            ``[-1, 1]`` for normalized embeddings) independent of the query length. Defaults to False.
 
     Returns:
         Tensor: Matrix with ``res[i][j]`` = MaxSim(a[i], b[j]), shape ``(batch_a, batch_b)``, always
@@ -401,6 +415,7 @@ def maxsim(
         # An empty query or document set: nothing to score, and pad_sequence rejects an empty list.
         device = _embeddings_device(b) or _embeddings_device(a)
         return torch.zeros(len(a), len(b), dtype=torch.float32, device=device)
+    query_token_counts = _query_token_counts(a, a_mask) if length_normalize else None
     a, a_mask_padded = _pad_multi_vector_inputs(a, a_mask)
     if a_mask_padded is not None:
         a_mask_padded = _fit_mask_width(a_mask_padded, a.shape[1], "a_mask")
@@ -428,7 +443,10 @@ def maxsim(
     for d_start, d_end in ranges:
         chunk_b, chunk_b_mask = _pad_chunk(b, b_mask, d_start, d_end, device, "b_mask")
         score_chunks.append(_maxsim_score_documents(a, chunk_b, a_mask_padded, chunk_b_mask))
-    return torch.cat(score_chunks, dim=1)
+    scores = torch.cat(score_chunks, dim=1)
+    if query_token_counts is not None:
+        scores = scores / query_token_counts.to(device=scores.device, dtype=scores.dtype).unsqueeze(1)
+    return scores
 
 
 def _maxsim_score_documents(a: Tensor, b: Tensor, a_mask: Tensor | None, b_mask: Tensor | None) -> Tensor:
@@ -482,7 +500,8 @@ def _fill_empty_document_scores(scores: Tensor, empty: Tensor) -> Tensor:
             "Encountered documents without any scoreable token during multi-vector similarity scoring, "
             "e.g. because MultiVectorMask (via keep_only_token_ids or skiplist_words) masked out every "
             "token, or because a document embedding has zero token vectors. These documents score "
-            f"{_EMPTY_DOCUMENT_SCORE:.0e}, ranking them below every real document."
+            f"about {_EMPTY_DOCUMENT_SCORE:.0e} (before any normalization), ranking them below every "
+            "real document."
         )
     return scores.masked_fill(empty, _EMPTY_DOCUMENT_SCORE)
 
@@ -493,6 +512,7 @@ def maxsim_pairwise(
     a_mask: Tensor | None = None,
     b_mask: Tensor | None = None,
     pair_chunk_elements: int | None = None,
+    length_normalize: bool = False,
 ) -> Tensor:
     """
     Computes the pairwise MaxSim (late-interaction) score between each query-document pair.
@@ -521,6 +541,9 @@ def maxsim_pairwise(
             outlier only sizes its own chunk) that stay under the budget, with a floor of one pair per
             chunk. Defaults to None, which applies a 100M-element budget (at most ~400 MB, half that
             in bf16 / fp16).
+        length_normalize (bool, optional): Divide each score by the number of real (unmasked) query
+            tokens, yielding MeanMaxSim: scores land in the per-token similarity range (about
+            ``[-1, 1]`` for normalized embeddings) independent of the query length. Defaults to False.
 
     Returns:
         Tensor: Vector with ``res[i]`` = MaxSim(a[i], b[i]), shape ``(batch,)``, always float32
@@ -536,6 +559,7 @@ def maxsim_pairwise(
         # No pairs to score, and pad_sequence rejects an empty list.
         device = _embeddings_device(b) or _embeddings_device(a)
         return torch.zeros(0, dtype=torch.float32, device=device)
+    query_token_counts = _query_token_counts(a, a_mask) if length_normalize else None
 
     budget = pair_chunk_elements if pair_chunk_elements is not None else _MAXSIM_CHUNK_ELEMENT_BUDGET
     query_widths = [len(query) for query in a] if isinstance(a, list) else [a.shape[1]] * len(a)
@@ -559,7 +583,10 @@ def maxsim_pairwise(
         chunk_a, chunk_a_mask = _pad_chunk(a, a_mask, start, end, device, "a_mask")
         chunk_b, chunk_b_mask = _pad_chunk(b, b_mask, start, end, device, "b_mask")
         score_chunks.append(_maxsim_score_pairs(chunk_a, chunk_b, chunk_a_mask, chunk_b_mask))
-    return torch.cat(score_chunks, dim=0)
+    scores = torch.cat(score_chunks, dim=0)
+    if query_token_counts is not None:
+        scores = scores / query_token_counts.to(device=scores.device, dtype=scores.dtype)
+    return scores
 
 
 def _maxsim_score_pairs(a: Tensor, b: Tensor, a_mask: Tensor | None, b_mask: Tensor | None) -> Tensor:
