@@ -34,7 +34,6 @@ class MultiVectorDistillKLDivLoss(nn.Module):
             ``(Q, N, d_tokens, dim)``, returns ``(Q, N)`` scores. Defaults to
             :func:`~sentence_transformers.multi_vector_encoder.scoring.colbert_kd_scores`. Pass
             :class:`~sentence_transformers.multi_vector_encoder.scoring.XTRKDScores` for XTR-style scoring.
-        size_average: ``True`` (default) uses ``reduction="batchmean"``. ``False`` uses ``reduction="sum"``.
         normalize_scores: If True, min-max normalise the student scores along the ``N`` dimension before
             softmaxing. Useful when student and teacher score ranges differ, but masks the absolute
             magnitude. Defaults to True (matches PyLate).
@@ -80,7 +79,6 @@ class MultiVectorDistillKLDivLoss(nn.Module):
         self,
         model: MultiVectorEncoder,
         similarity_fct: Callable | None = None,
-        size_average: bool = True,
         normalize_scores: bool = True,
         temperature: float = 1.0,
         mini_batch_size: int | None = None,
@@ -90,9 +88,8 @@ class MultiVectorDistillKLDivLoss(nn.Module):
         self.similarity_fct = similarity_fct if similarity_fct is not None else colbert_kd_scores
         self.normalize_scores = normalize_scores
         self.temperature = temperature
-        self.size_average = size_average
         self.mini_batch_size = mini_batch_size
-        self.loss_function = nn.KLDivLoss(reduction="batchmean" if size_average else "sum", log_target=True)
+        self.loss_function = nn.KLDivLoss(reduction="batchmean", log_target=True)
 
     def get_config_dict(self) -> dict[str, Any]:
         similarity_fct = getattr(self.similarity_fct, "__name__", type(self.similarity_fct).__name__)
@@ -105,7 +102,6 @@ class MultiVectorDistillKLDivLoss(nn.Module):
             "similarity_fct": similarity_fct,
             "normalize_scores": self.normalize_scores,
             "temperature": self.temperature,
-            "size_average": self.size_average,
             "mini_batch_size": self.mini_batch_size,
         }
 
@@ -132,8 +128,8 @@ class MultiVectorDistillKLDivLoss(nn.Module):
         n_ways = len(sentence_features) - 1
         if labels.shape != (bs, n_ways):
             raise ValueError(
-                f"{type(self).__name__} expects teacher scores of shape (batch_size, n_ways) = "
-                f"({bs}, {n_ways}), but got {tuple(labels.shape)}."
+                f"{type(self).__name__} expects teacher scores of shape (batch_size, N) = "
+                f"({bs}, {n_ways}) for N candidate documents per query, but got {tuple(labels.shape)}."
             )
 
         # Stack the per-column document embeddings into (batch_size, n_ways, d_tokens, dim), padding

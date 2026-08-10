@@ -87,10 +87,16 @@ class MultiVectorEncoderModelCardData(BaseModelCardData):
 
     def get_model_specific_metadata(self) -> dict[str, Any]:
         metadata = super().get_model_specific_metadata()
+        # Humanize like the dense and sparse cards. The generic .title() fallback would render
+        # "Maxsim" / "Xtr".
+        similarity_fn_name = {
+            "maxsim": "MaxSim",
+            "xtr": "XTR",
+        }.get(self.model.similarity_fn_name, self.model.similarity_fn_name.replace("_", " ").title())
         metadata.update(
             {
                 "output_dimensionality": self.model.get_embedding_dimension(),
-                "similarity_fn_name": self.model.similarity_fn_name,
+                "similarity_fn_name": similarity_fn_name,
             }
         )
         # A "fixed" expansion pins every query to its own length, overriding the base's query_length.

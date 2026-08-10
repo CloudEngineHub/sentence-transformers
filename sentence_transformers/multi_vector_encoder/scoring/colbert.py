@@ -79,8 +79,8 @@ def colbert_scores(
 
     Takes ``(Q_query, q_tokens, dim)`` query embeddings and ``(Q_doc, N, d_tokens, dim)`` stacked
     per-query document groups and returns the full ``(Q_query, Q_doc * N)`` score matrix (float32
-    regardless of the input dtype) with query-major ordering: ``scores[i, j*N + k]`` is the MaxSim of
-    query ``i`` against the ``k``-th document in doc-group ``j``. When called with matched
+    regardless of the input dtype) with query-major ordering: ``scores[i, j*N + n]`` is the MaxSim of
+    query ``i`` against the ``n``-th document in doc-group ``j``. When called with matched
     ``Q_query == Q_doc``, the positive for query ``i`` sits at column ``i*N``.
 
     The document axis is iterated group-by-group so that only one ``(Q_query, Q_doc, q_tokens, d_tokens)``

@@ -28,10 +28,6 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
 
     Args:
         model: A :class:`~sentence_transformers.MultiVectorEncoder` model.
-        similarity_fct: Scoring callable. Receives queries ``(Q, q_tokens, dim)`` and stacked documents
-            ``(Q, N, d_tokens, dim)`` and returns ``(Q, Q*N)`` with query-major ordering. Defaults to
-            :func:`~sentence_transformers.multi_vector_encoder.scoring.colbert_scores`. Pass
-            :class:`~sentence_transformers.multi_vector_encoder.scoring.XTRScores` for XTR-style scoring.
         scale: ``1 / temperature``. Scores are multiplied by ``scale`` before cross-entropy. Defaults to
             ``1.0`` (``temperature=1.0``), matching PyLate. Unlike cosine similarity (bounded to
             ``[-1, 1]``, where ST's dense :class:`~sentence_transformers.losses.MultipleNegativesRankingLoss`
@@ -39,6 +35,10 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
             similarities (range ``~[0, num_query_tokens]``), so it needs no amplification. This is the same
             reason the dense loss recommends ``scale=1`` for dot-product similarity. ``scale=20`` here would
             saturate the softmax and kill gradients.
+        similarity_fct: Scoring callable. Receives queries ``(Q, q_tokens, dim)`` and stacked documents
+            ``(Q, N, d_tokens, dim)`` and returns ``(Q, Q*N)`` with query-major ordering. Defaults to
+            :func:`~sentence_transformers.multi_vector_encoder.scoring.colbert_scores`. Pass
+            :class:`~sentence_transformers.multi_vector_encoder.scoring.XTRScores` for XTR-style scoring.
         mini_batch_size: Maximum number of rows per model forward during the **embedding** phase. The
             document columns are merged into one ``batch_size * N``-row batch and split into row chunks,
             each embedded at its own width, so a single long outlier document only widens its own chunk.
@@ -49,7 +49,6 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
         score_mini_batch_size: If set, queries are processed in chunks of this size during the scoring
             phase. Useful to bound transient scoring memory for large effective batch sizes. Gradients
             still flow through a single backward.
-        size_average: Whether to average (``True``, default) or sum the cross-entropy loss across the batch.
         gather_across_devices: If True, AllGather document embeddings (and masks) across DDP ranks so that
             every rank's queries see the global batch of documents. Useful for very large effective batches.
 
@@ -93,22 +92,20 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
     def __init__(
         self,
         model: MultiVectorEncoder,
-        similarity_fct: Callable | None = None,
         scale: float = 1.0,
+        similarity_fct: Callable | None = None,
         mini_batch_size: int | None = None,
         score_mini_batch_size: int | None = None,
-        size_average: bool = True,
         gather_across_devices: bool = False,
     ) -> None:
         super().__init__()
         if scale <= 0:
             raise ValueError("Scale must be a positive value.")
         self.model = model
-        self.similarity_fct = similarity_fct if similarity_fct is not None else colbert_scores
         self.scale = scale
+        self.similarity_fct = similarity_fct if similarity_fct is not None else colbert_scores
         self.mini_batch_size = mini_batch_size
         self.score_mini_batch_size = score_mini_batch_size
-        self.size_average = size_average
         self.gather_across_devices = gather_across_devices
 
     def get_config_dict(self) -> dict[str, Any]:
@@ -119,11 +116,10 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
             args = ", ".join(f"{key}={value!r}" for key, value in metric_config().items())
             similarity_fct = f"{similarity_fct}({args})"
         return {
-            "similarity_fct": similarity_fct,
             "scale": self.scale,
+            "similarity_fct": similarity_fct,
             "mini_batch_size": self.mini_batch_size,
             "score_mini_batch_size": self.score_mini_batch_size,
-            "size_average": self.size_average,
             "gather_across_devices": self.gather_across_devices,
         }
 
@@ -177,11 +173,7 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
         if self.gather_across_devices:
             labels = labels + get_rank() * batch_size * N
 
-        return F.cross_entropy(
-            scores * self.scale,
-            labels,
-            reduction="mean" if self.size_average else "sum",
-        )
+        return F.cross_entropy(scores * self.scale, labels)
 
     @property
     def citation(self) -> str:

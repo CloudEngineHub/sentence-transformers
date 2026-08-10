@@ -150,14 +150,14 @@ class BaseTokenPooling(Module, ABC):
         self.save_config(output_path)
 
 
-def _hierarchical_pool_one(embedding: Tensor, pool_factor: int, protected_tokens: int) -> Tensor:
+def _hierarchical_pool_one(embedding: Tensor, pool_factor: int, num_protected_tokens: int) -> Tensor:
     """Ward hierarchical clustering on cosine distance for a single 2D embedding."""
     from scipy.cluster import hierarchy
 
     device = embedding.device
     embedding = embedding.cpu()
-    protected = embedding[:protected_tokens]
-    to_pool = embedding[protected_tokens:]
+    protected = embedding[:num_protected_tokens]
+    to_pool = embedding[num_protected_tokens:]
     num_to_pool = len(to_pool)
     num_clusters = max(num_to_pool // pool_factor, 1)
 
@@ -185,7 +185,7 @@ def _hierarchical_pool_one(embedding: Tensor, pool_factor: int, protected_tokens
 
 class HierarchicalTokenPooling(BaseTokenPooling):
     """Ward-linkage hierarchical clustering on cosine similarity. Keeps the first
-    ``protected_tokens`` untouched (typically the ``[CLS]``), clusters the rest into
+    ``num_protected_tokens`` untouched (typically the ``[CLS]``), clusters the rest into
     ``num_tokens // pool_factor`` groups, and replaces each cluster with its mean.
 
     Assumes L2-normalized embeddings (place after a
@@ -196,26 +196,26 @@ class HierarchicalTokenPooling(BaseTokenPooling):
     ``linkage`` quirk, protected tokens re-appended at the end) nor colpali-engine's
     ``HierarchicalTokenPooler`` (different linkage input, cluster means re-normalized to unit norm,
     no protected-token concept), so indexes pooled with those tools will not be byte-reproducible.
-    For the closest colpali-engine setup, pass ``protected_tokens=0`` and re-normalize afterwards.
+    For the closest colpali-engine setup, pass ``num_protected_tokens=0`` and re-normalize afterwards.
 
     Args:
         pool_factor: Keep roughly ``1 / pool_factor`` of each document's tokens. ``1`` (default)
             disables pooling (the module becomes a no-op).
-        protected_tokens: Leading tokens excluded from pooling (typically ``[CLS]``). Default 1.
+        num_protected_tokens: Leading tokens excluded from pooling (typically ``[CLS]``). Default 1.
             colpali-engine has no protected-token concept: use ``0`` when matching its setup.
         pool_queries: Also pool query embeddings. Defaults to False (only compress documents).
     """
 
-    config_keys: list[str] = ["pool_factor", "protected_tokens", "pool_queries"]
+    config_keys: list[str] = ["pool_factor", "num_protected_tokens", "pool_queries"]
 
-    def __init__(self, pool_factor: int = 1, protected_tokens: int = 1, pool_queries: bool = False) -> None:
+    def __init__(self, pool_factor: int = 1, num_protected_tokens: int = 1, pool_queries: bool = False) -> None:
         super().__init__(pool_queries=pool_queries)
         if pool_factor < 1:
             raise ValueError(f"pool_factor must be >= 1, got {pool_factor}.")
-        if protected_tokens < 0:
-            raise ValueError(f"protected_tokens must be >= 0, got {protected_tokens}.")
+        if num_protected_tokens < 0:
+            raise ValueError(f"num_protected_tokens must be >= 0, got {num_protected_tokens}.")
         self.pool_factor = pool_factor
-        self.protected_tokens = protected_tokens
+        self.num_protected_tokens = num_protected_tokens
 
     def forward(self, features: dict[str, Tensor], task: str | None = None) -> dict[str, Tensor]:
         # No-op fast path for the default disabled setting so an included-but-off module has no cost.
@@ -224,7 +224,7 @@ class HierarchicalTokenPooling(BaseTokenPooling):
         return super().forward(features, task=task)
 
     def _pool_one(self, embedding: Tensor, **kwargs) -> Tensor:
-        return _hierarchical_pool_one(embedding, self.pool_factor, self.protected_tokens)
+        return _hierarchical_pool_one(embedding, self.pool_factor, self.num_protected_tokens)
 
 
 class LambdaTokenPooling(BaseTokenPooling):
@@ -232,11 +232,11 @@ class LambdaTokenPooling(BaseTokenPooling):
 
     Cannot be baked into a saved checkpoint (a Python callable isn't serializable), and will not
     round-trip through :meth:`MultiVectorEncoder.encode`'s multi-process path (``pool=`` arg) if
-    ``pool_func`` is a lambda or nested function. Use in the pipeline for experimentation, or
+    ``pool_fn`` is a lambda or nested function. Use in the pipeline for experimentation, or
     standalone / per-call for ad-hoc compression.
 
     Args:
-        pool_func: A callable that takes a ``(num_tokens, dim)`` tensor and returns a
+        pool_fn: A callable that takes a ``(num_tokens, dim)`` tensor and returns a
             ``(num_out, dim)`` tensor. Applied once per document in a batch.
 
     Example::
@@ -246,16 +246,16 @@ class LambdaTokenPooling(BaseTokenPooling):
             n = emb.size(0)
             return emb[: n - n % 2].view(n // 2, 2, -1).mean(dim=1)
 
-        pooling = LambdaTokenPooling(pool_func=halve)
+        pooling = LambdaTokenPooling(pool_fn=halve)
         pooled = pooling.pool(document_embeddings)
     """
 
-    def __init__(self, pool_func: Callable[[Tensor], Tensor], pool_queries: bool = False) -> None:
+    def __init__(self, pool_fn: Callable[[Tensor], Tensor], pool_queries: bool = False) -> None:
         super().__init__(pool_queries=pool_queries)
-        self.pool_func = pool_func
+        self.pool_fn = pool_fn
 
     def _pool_one(self, embedding: Tensor, **kwargs) -> Tensor:
-        return self.pool_func(embedding)
+        return self.pool_fn(embedding)
 
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
         raise NotImplementedError(

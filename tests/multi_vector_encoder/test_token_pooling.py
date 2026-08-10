@@ -77,7 +77,7 @@ class TestPoolShapeInvariants:
         )
         padded = emb.unsqueeze(0)  # (1, 4, 2)
         # Round-trip through LambdaTokenPooling with an identity func, no attention_mask.
-        out = LambdaTokenPooling(pool_func=lambda x: x).pool(padded, padding_side="right")
+        out = LambdaTokenPooling(pool_fn=lambda x: x).pool(padded, padding_side="right")
         # Expected: real rows [0..2] preserved (including middle zero). Trailing pad row dropped.
         assert out.shape == (1, 3, 2)
 
@@ -89,8 +89,8 @@ class TestHierarchicalTokenPooling:
         from sentence_transformers.multi_vector_encoder.modules.token_pooling import _hierarchical_pool_one
 
         emb = _normed((15, 8))
-        direct = _hierarchical_pool_one(emb, pool_factor=2, protected_tokens=1)
-        via_pool = HierarchicalTokenPooling(pool_factor=2, protected_tokens=1).pool([emb])[0]
+        direct = _hierarchical_pool_one(emb, pool_factor=2, num_protected_tokens=1)
+        via_pool = HierarchicalTokenPooling(pool_factor=2, num_protected_tokens=1).pool([emb])[0]
         assert torch.allclose(direct, via_pool)
 
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
@@ -98,10 +98,10 @@ class TestHierarchicalTokenPooling:
         # The ColPali/ColQwen2 family runs bf16 by default, and numpy has no bfloat16: the scipy
         # distance step must run in fp32 while the pooled output keeps the input dtype.
         emb = _normed((15, 8)).to(dtype)
-        out = HierarchicalTokenPooling(pool_factor=2, protected_tokens=1).pool([emb])[0]
+        out = HierarchicalTokenPooling(pool_factor=2, num_protected_tokens=1).pool([emb])[0]
         assert out.dtype == dtype
         # Same values in fp32 must yield the same clustering: only the mean accumulation dtype differs.
-        reference = HierarchicalTokenPooling(pool_factor=2, protected_tokens=1).pool([emb.float()])[0]
+        reference = HierarchicalTokenPooling(pool_factor=2, num_protected_tokens=1).pool([emb.float()])[0]
         assert out.shape == reference.shape
         assert torch.allclose(out.float(), reference, atol=1e-2)
 
@@ -116,9 +116,9 @@ class TestHierarchicalTokenPooling:
         out = pooling.forward(features, task="document")
         assert out is features  # returned unchanged (fast path)
 
-    def test_protected_tokens_untouched(self) -> None:
+    def test_num_protected_tokens_untouched(self) -> None:
         emb = _normed((12, 8))
-        out = HierarchicalTokenPooling(pool_factor=2, protected_tokens=2).pool([emb])[0]
+        out = HierarchicalTokenPooling(pool_factor=2, num_protected_tokens=2).pool([emb])[0]
         # First 2 rows are the protected tokens verbatim.
         assert torch.allclose(out[:2], emb[:2])
 
@@ -128,12 +128,12 @@ class TestHierarchicalTokenPooling:
         # Verifies the scatter_add + dense-remap math.
         torch.manual_seed(1)
         emb = _normed((7, 4))  # 6 non-protected rows -> brute-force over 2^6 subsets is trivial.
-        protected_tokens = 1
+        num_protected_tokens = 1
         pool_factor = 3
-        pooling = HierarchicalTokenPooling(pool_factor=pool_factor, protected_tokens=protected_tokens)
+        pooling = HierarchicalTokenPooling(pool_factor=pool_factor, num_protected_tokens=num_protected_tokens)
         out = pooling.pool([emb])[0]
-        pooled_rows = out[protected_tokens:]
-        source_rows = emb[protected_tokens:]
+        pooled_rows = out[num_protected_tokens:]
+        source_rows = emb[num_protected_tokens:]
         n = source_rows.size(0)
         used = [False] * n
         for pooled_row in pooled_rows:
@@ -152,17 +152,17 @@ class TestHierarchicalTokenPooling:
 
 
 class TestLambdaTokenPooling:
-    def test_applies_pool_func_per_sample(self) -> None:
+    def test_applies_pool_fn_per_sample(self) -> None:
         def halve(emb: Tensor) -> Tensor:
             n = emb.size(0)
             return emb[: n - n % 2].view(-1, 2, emb.size(-1)).mean(dim=1)
 
         docs = [_normed((10, 4)), _normed((6, 4))]
-        out = LambdaTokenPooling(pool_func=halve).pool(docs)
+        out = LambdaTokenPooling(pool_fn=halve).pool(docs)
         assert [e.shape for e in out] == [(5, 4), (3, 4)]
 
     def test_save_raises_not_implemented(self, tmp_path) -> None:
-        pooling = LambdaTokenPooling(pool_func=lambda x: x)
+        pooling = LambdaTokenPooling(pool_fn=lambda x: x)
         with pytest.raises(NotImplementedError, match="cannot be saved"):
             pooling.save(str(tmp_path))
 
@@ -175,16 +175,16 @@ def _keep_first_two(emb: Tensor) -> Tensor:
 class TestPicklability:
     def test_hierarchical_pooling_round_trips_through_pickle(self) -> None:
         # Ensures `pool={...}` (multi-process encode) works with a saveable pooling.
-        pooling = HierarchicalTokenPooling(pool_factor=3, protected_tokens=1)
+        pooling = HierarchicalTokenPooling(pool_factor=3, num_protected_tokens=1)
         restored = pickle.loads(pickle.dumps(pooling))
         assert isinstance(restored, HierarchicalTokenPooling)
-        assert restored.pool_factor == 3 and restored.protected_tokens == 1
+        assert restored.pool_factor == 3 and restored.num_protected_tokens == 1
         emb = _normed((12, 8))
         assert torch.allclose(pooling.pool([emb])[0], restored.pool([emb])[0])
 
     def test_lambda_pooling_with_top_level_func_pickles(self) -> None:
-        # LambdaTokenPooling survives pickle as long as `pool_func` is picklable itself.
-        pooling = LambdaTokenPooling(pool_func=_keep_first_two)
+        # LambdaTokenPooling survives pickle as long as `pool_fn` is picklable itself.
+        pooling = LambdaTokenPooling(pool_fn=_keep_first_two)
         restored = pickle.loads(pickle.dumps(pooling))
         assert isinstance(restored, LambdaTokenPooling)
         emb = _normed((10, 4))
@@ -192,7 +192,7 @@ class TestPicklability:
 
     def test_lambda_pooling_with_lambda_does_not_pickle(self) -> None:
         # Anonymous lambdas / nested functions won't pickle. Confirms the docstring caveat.
-        pooling = LambdaTokenPooling(pool_func=lambda x: x)
+        pooling = LambdaTokenPooling(pool_fn=lambda x: x)
         with pytest.raises((pickle.PicklingError, AttributeError)):
             pickle.dumps(pooling)
 
@@ -248,7 +248,7 @@ class TestEncodeWithPooling:
         text = "some longer text with multiple tokens"
         out = model.encode_document(
             [text],
-            pooling=LambdaTokenPooling(pool_func=keep_first_two),
+            pooling=LambdaTokenPooling(pool_fn=keep_first_two),
             convert_to_tensor=True,
         )[0]
         assert out.shape[0] == 2
@@ -326,9 +326,9 @@ class TestConstructorValidation:
         with pytest.raises(ValueError, match="pool_factor must be >= 1"):
             HierarchicalTokenPooling(pool_factor=bad)
 
-    def test_protected_tokens_must_be_non_negative(self) -> None:
-        with pytest.raises(ValueError, match="protected_tokens must be >= 0"):
-            HierarchicalTokenPooling(protected_tokens=-1)
+    def test_num_protected_tokens_must_be_non_negative(self) -> None:
+        with pytest.raises(ValueError, match="num_protected_tokens must be >= 0"):
+            HierarchicalTokenPooling(num_protected_tokens=-1)
 
     def test_pool_queries_round_trips_through_config(self, tmp_path) -> None:
         HierarchicalTokenPooling(pool_factor=2, pool_queries=True).save(str(tmp_path))
@@ -342,7 +342,7 @@ class TestForwardEdgeCases:
         # A features dict with a 0-batch must round-trip without collapsing to 1D. Cover both a
         # subclass that routes through super().forward (Hierarchical at pool_factor>1) and one that
         # reaches BaseTokenPooling.forward directly (Lambda).
-        for pooling in (HierarchicalTokenPooling(pool_factor=2), LambdaTokenPooling(pool_func=lambda x: x)):
+        for pooling in (HierarchicalTokenPooling(pool_factor=2), LambdaTokenPooling(pool_fn=lambda x: x)):
             features = {
                 "token_embeddings": torch.empty((0, 5, 4)),
                 "attention_mask": torch.empty((0, 5), dtype=torch.bool),
@@ -354,7 +354,7 @@ class TestForwardEdgeCases:
     def test_forward_fully_padded_row_in_batch(self) -> None:
         # A fully-padded (all-masked) row pools to zero tokens. The other rows pool normally and the
         # batch right-pads to the max pooled length.
-        pooling = LambdaTokenPooling(pool_func=lambda emb: emb[: max(emb.size(0) // 2, 1)] if emb.size(0) else emb)
+        pooling = LambdaTokenPooling(pool_fn=lambda emb: emb[: max(emb.size(0) // 2, 1)] if emb.size(0) else emb)
         embeddings = torch.randn(3, 10, 4)
         attention_mask = torch.zeros(3, 10, dtype=torch.bool)
         # Row 0: fully padded (all False). Row 1 and 2: right-padded.
@@ -374,7 +374,7 @@ class TestBaseForwardVariableLength:
         # Exercise BaseTokenPooling.forward via LambdaTokenPooling (HierarchicalTokenPooling.forward
         # short-circuits with a fast path, so the base's re-pad + mask reconstruction is untested
         # unless we route through Lambda).
-        pooling = LambdaTokenPooling(pool_func=lambda emb: emb[: max(emb.size(0) // 2, 1)])
+        pooling = LambdaTokenPooling(pool_fn=lambda emb: emb[: max(emb.size(0) // 2, 1)])
         # Batch of two documents with different real lengths (mask=1 for the first 8 / 6 rows).
         embeddings = torch.randn(2, 10, 4)
         attention_mask = torch.zeros(2, 10, dtype=torch.bool)
@@ -442,6 +442,6 @@ class TestUnbindAndPadEdge:
             ]
         )
         padded = emb.unsqueeze(0)  # (1, 4, 2)
-        out = LambdaTokenPooling(pool_func=lambda x: x).pool(padded, padding_side="left")
+        out = LambdaTokenPooling(pool_fn=lambda x: x).pool(padded, padding_side="left")
         # Expected: 3 real rows kept, left-padded so leading position stays zero.
         assert out.shape == (1, 3, 2)

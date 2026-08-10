@@ -66,10 +66,11 @@ class MultiVectorRerankingEvaluator(RerankingEvaluator):
         samples: list[dict],
         at_k: int = 10,
         name: str = "",
-        batch_size: int = 16,
-        show_progress_bar: bool = False,
         write_csv: bool = True,
         similarity_fct: Callable[[Tensor | list[Tensor], list[Tensor]], Tensor] | None = None,
+        batch_size: int = 16,
+        show_progress_bar: bool = False,
+        use_batched_encoding: bool = True,
     ) -> None:
         self._user_similarity_fct = similarity_fct
         super().__init__(
@@ -80,6 +81,7 @@ class MultiVectorRerankingEvaluator(RerankingEvaluator):
             similarity_fct=similarity_fct,
             batch_size=batch_size,
             show_progress_bar=show_progress_bar,
+            use_batched_encoding=use_batched_encoding,
         )
 
     def __call__(self, model: MultiVectorEncoder, *args, **kwargs) -> dict[str, float]:

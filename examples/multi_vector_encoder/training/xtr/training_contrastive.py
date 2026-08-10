@@ -62,7 +62,7 @@ def main():
 
     # 3. Define our training loss. Same loss class as the ColBERT recipe. We only swap the scoring callable for
     # XTRScores, which keeps the top-k token matches per query token across all in-batch documents.
-    loss = MultiVectorMultipleNegativesRankingLoss(model=model, similarity_fct=XTRScores(k=256))
+    loss = MultiVectorMultipleNegativesRankingLoss(model=model, similarity_fct=XTRScores(top_k=256))
 
     # 4. Define the evaluator. We use the MultiVectorNanoBEIREvaluator, which is a light-weight evaluator for English
     # (retrieval is scored with MaxSim, the standard late-interaction inference, regardless of the training score metric)

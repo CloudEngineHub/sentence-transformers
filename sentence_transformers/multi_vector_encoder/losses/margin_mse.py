@@ -35,7 +35,6 @@ class MultiVectorMarginMSELoss(nn.Module):
             :func:`~sentence_transformers.multi_vector_encoder.scoring.colbert_scores_pairwise`.
             Pass :func:`~sentence_transformers.multi_vector_encoder.scoring.xtr_scores_pairwise`
             for XTR-style scoring.
-        size_average: ``True`` (default) averages the MSE across the batch. ``False`` sums.
         mini_batch_size: Maximum number of rows per model forward. The merged document batch is
             split into row chunks, each re-trimmed to its own longest document, so a single long
             outlier document only widens its own chunk. Chunking is exact for this loss (no
@@ -74,15 +73,13 @@ class MultiVectorMarginMSELoss(nn.Module):
         self,
         model: MultiVectorEncoder,
         similarity_fct: Callable | None = None,
-        size_average: bool = True,
         mini_batch_size: int | None = None,
     ) -> None:
         super().__init__()
         self.model = model
         self.similarity_fct = similarity_fct if similarity_fct is not None else colbert_scores_pairwise
-        self.size_average = size_average
         self.mini_batch_size = mini_batch_size
-        self.loss_function = nn.MSELoss(reduction="mean" if size_average else "sum")
+        self.loss_function = nn.MSELoss()
 
     def get_config_dict(self) -> dict[str, Any]:
         similarity_fct = getattr(self.similarity_fct, "__name__", type(self.similarity_fct).__name__)
@@ -93,7 +90,6 @@ class MultiVectorMarginMSELoss(nn.Module):
             similarity_fct = f"{similarity_fct}({args})"
         return {
             "similarity_fct": similarity_fct,
-            "size_average": self.size_average,
             "mini_batch_size": self.mini_batch_size,
         }
 

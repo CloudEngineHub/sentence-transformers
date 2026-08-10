@@ -12,14 +12,14 @@ def xtr_scores(
     documents_embeddings: list | np.ndarray | torch.Tensor,
     queries_mask: torch.Tensor | None = None,
     documents_mask: torch.Tensor | None = None,
-    k: int = 256,
+    top_k: int = 256,
     document_chunk_elements: int | None = None,
 ) -> torch.Tensor:
     """XTR (eXtendable Token Retrieval) contrastive scoring with global top-k token retrieval.
 
     For each query token, the top-k matches are selected globally across all in-batch document tokens
     (simulating retrieval from an index). Returns the full ``(Q, Q*N)`` cross-product score matrix with
-    query-major ordering: ``scores[i, j*N + k]`` is query ``i`` against query ``j``'s ``k``-th document.
+    query-major ordering: ``scores[i, j*N + n]`` is query ``i`` against query ``j``'s ``n``-th document.
     The positive for query ``i`` sits at column ``i*N``. As in :func:`~sentence_transformers.util.similarity.maxsim`,
     the matmul runs in the input dtype and the per-query-token accumulation and returned scores are float32.
 
@@ -33,7 +33,7 @@ def xtr_scores(
         queries_mask: optional ``(Q, q_tokens)`` mask.
         documents_mask: optional ``(Q, N, d_tokens)`` mask. If None, one is derived by treating
             all-zero document rows as padding (like :func:`~sentence_transformers.util.similarity.maxsim`).
-        k: Number of top token matches to retain per query token across all Q*N documents.
+        top_k: Number of top token matches to retain per query token across all Q*N documents.
         document_chunk_elements: Element budget for the matmul + ``masked_fill`` phase, matching
             :func:`~sentence_transformers.util.similarity.maxsim`'s parameter of the same name:
             documents are scored in chunks packed to stay under the budget. The chunks are
@@ -87,7 +87,7 @@ def xtr_scores(
         del score_chunks, chunk_scores
 
     clubbed = scores.flatten(2, 3)
-    top_values, indices = clubbed.topk(min(k, clubbed.shape[-1]), dim=-1, sorted=False)
+    top_values, indices = clubbed.topk(min(top_k, clubbed.shape[-1]), dim=-1, sorted=False)
     masked = torch.zeros_like(clubbed).scatter_(-1, indices, top_values)
     # Paper-exact Z (Lee et al. 2023, eq. 5): the count of query tokens that retrieved at least one
     # real token of the document. PyLate / PrimeQA count positive per-token maxima with a 1e-3 clamp
@@ -107,7 +107,7 @@ def xtr_scores(
     Z = alpha.float().sum(dim=1).clamp_(min=1)
     scores = scores_sum / Z
     # Every token of a fully masked document sits at the dtype minimum: the sum overflows to -inf
-    # when k spans all tokens, and the scatter flattens it to a retrievable-looking 0 below that.
+    # when top_k spans all tokens, and the scatter flattens it to a retrievable-looking 0 below that.
     return _fill_empty_document_scores(scores, ~docs_mask_flat.bool().any(dim=-1))
 
 
@@ -116,7 +116,7 @@ def xtr_kd_scores(
     documents_embeddings: list | np.ndarray | torch.Tensor,
     queries_mask: torch.Tensor | None = None,
     documents_mask: torch.Tensor | None = None,
-    k: int = 256,
+    top_k: int = 256,
     document_chunk_elements: int | None = None,
 ) -> torch.Tensor:
     """XTR scoring for knowledge distillation.
@@ -132,7 +132,7 @@ def xtr_kd_scores(
         documents_embeddings,
         queries_mask=queries_mask,
         documents_mask=documents_mask,
-        k=k,
+        top_k=top_k,
         document_chunk_elements=document_chunk_elements,
     )
     idx = torch.arange(Q, device=all_scores.device).unsqueeze(1) * N + torch.arange(N, device=all_scores.device)
@@ -144,14 +144,14 @@ def xtr_scores_pairwise(
     documents_embeddings: list | np.ndarray | torch.Tensor,
     queries_mask: torch.Tensor | None = None,
     documents_mask: torch.Tensor | None = None,
-    k: int = 256,
+    top_k: int = 256,
     document_chunk_elements: int | None = None,
 ) -> torch.Tensor:
     """Pairwise XTR scoring: compute the XTR score for matched ``(query_i, document_i)`` pairs.
 
     Returns a float32 1D tensor of length ``batch_size``. XTR's top-k runs globally over the batch's
     pooled document tokens, so unlike MaxSim a pair's score shifts with the batch composition
-    whenever ``k`` is below the pooled token count.
+    whenever ``top_k`` is below the pooled token count.
     """
     # Reshape to (Q, N=1, Dt, H), score with xtr_kd_scores, take the diagonal.
     documents_embeddings = _convert_to_tensor(documents_embeddings)
@@ -164,7 +164,7 @@ def xtr_scores_pairwise(
         documents_embeddings,
         queries_mask=queries_mask,
         documents_mask=documents_mask,
-        k=k,
+        top_k=top_k,
         document_chunk_elements=document_chunk_elements,
     )
     return scores.squeeze(-1)
@@ -173,21 +173,21 @@ def xtr_scores_pairwise(
 class XTRScores:
     """Configured, reusable :func:`xtr_scores` callable for use as a loss ``similarity_fct``.
 
-    Stores ``k`` / ``document_chunk_elements`` so they don't have to be re-passed on every call (the bare
+    Stores ``top_k`` / ``document_chunk_elements`` so they don't have to be re-passed on every call (the bare
     function would otherwise need :func:`functools.partial`). See :func:`xtr_scores` for the scoring math
     and shapes.
 
     Args:
-        k: Number of top token matches to retain per query token across all Q*N documents.
+        top_k: Number of top token matches to retain per query token across all Q*N documents.
         document_chunk_elements: Element budget for the chunked matmul phase, see :func:`xtr_scores`.
     """
 
-    def __init__(self, k: int = 256, document_chunk_elements: int | None = None) -> None:
-        self.k = k
+    def __init__(self, top_k: int = 256, document_chunk_elements: int | None = None) -> None:
+        self.top_k = top_k
         self.document_chunk_elements = document_chunk_elements
 
     def get_config_dict(self) -> dict[str, int | None]:
-        return {"k": self.k, "document_chunk_elements": self.document_chunk_elements}
+        return {"top_k": self.top_k, "document_chunk_elements": self.document_chunk_elements}
 
     def __call__(
         self,
@@ -201,7 +201,7 @@ class XTRScores:
             documents_embeddings,
             queries_mask=queries_mask,
             documents_mask=documents_mask,
-            k=self.k,
+            top_k=self.top_k,
             document_chunk_elements=self.document_chunk_elements,
         )
 
@@ -221,6 +221,6 @@ class XTRKDScores(XTRScores):
             documents_embeddings,
             queries_mask=queries_mask,
             documents_mask=documents_mask,
-            k=self.k,
+            top_k=self.top_k,
             document_chunk_elements=self.document_chunk_elements,
         )

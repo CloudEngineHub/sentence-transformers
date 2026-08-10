@@ -743,7 +743,7 @@ def test_xtr_scores_clamps_topk_to_token_pool() -> None:
 
     queries = torch.nn.functional.normalize(torch.randn(2, 3, 8), dim=-1)
     documents = torch.nn.functional.normalize(torch.randn(2, 1, 4, 8), dim=-1)
-    scores = xtr_scores(queries, documents, k=256)
+    scores = xtr_scores(queries, documents, top_k=256)
     assert scores.shape == (2, 2)
     assert torch.isfinite(scores).all()
 
@@ -794,9 +794,9 @@ def test_xtr_scores_fully_masked_document_scores_sentinel() -> None:
     documents_mask = torch.ones(2, 2, 6, dtype=torch.bool)
     documents_mask[0, 1] = False
 
-    # k=256 spans the 24-token pool, k=4 does not.
+    # top_k=256 spans the 24-token pool, top_k=4 does not.
     for k in (256, 4):
-        scores = xtr_scores(queries, documents, documents_mask=documents_mask, k=k)
+        scores = xtr_scores(queries, documents, documents_mask=documents_mask, top_k=k)
         assert torch.isfinite(scores).all()
         assert (scores[:, 1] == -1e9).all()
         assert scores[:, [0, 2, 3]].abs().max() < 100
@@ -1066,7 +1066,7 @@ def test_pylate_shape_save_round_trips_to_new_query_expansion(tmp_path) -> None:
 
 def test_hierarchical_pooling_helper_reduces_token_count() -> None:
     emb = torch.nn.functional.normalize(torch.randn(10, 8), p=2, dim=1)
-    pooled = HierarchicalTokenPooling(pool_factor=2, protected_tokens=1).pool([emb])[0]
+    pooled = HierarchicalTokenPooling(pool_factor=2, num_protected_tokens=1).pool([emb])[0]
     # Fewer tokens, same dim, and the protected [CLS] row is untouched.
     assert pooled.shape[0] < emb.shape[0]
     assert pooled.shape[1] == emb.shape[1]
@@ -1262,7 +1262,7 @@ def test_xtr_scoring_callable_shape() -> None:
             [[[0.0, 1.0], [1.0, 0.0]], [[1.0, 0.0], [0.0, 1.0]]],
         ]
     )
-    scores = XTRScores(k=2)(q, d)
+    scores = XTRScores(top_k=2)(q, d)
     assert scores.shape == (2, 4)
 
 
@@ -1421,12 +1421,12 @@ def test_xtr_z_counts_retrieved_query_tokens() -> None:
     queries[0, 3, 0] = -1.0
     documents = torch.zeros(1, 1, 3, 2)
     documents[..., 0] = 0.5
-    scores = xtr_scores(queries, documents, k=3)
+    scores = xtr_scores(queries, documents, top_k=3)
     assert torch.allclose(scores, torch.tensor([[(3 * 0.5 - 0.5) / 4]]))
 
     negative_queries = torch.full((1, 4, 8), -0.5)
     negative_documents = torch.full((1, 2, 3, 8), 0.25)
-    scores = xtr_scores(negative_queries, negative_documents, k=6)
+    scores = xtr_scores(negative_queries, negative_documents, top_k=6)
     assert torch.allclose(scores, torch.full((1, 2), -1.0))
 
 
@@ -1437,8 +1437,8 @@ def test_xtr_kd_scores_gathers_own_document_groups() -> None:
     generator = torch.Generator().manual_seed(5)
     queries = torch.randn(2, 3, 8, generator=generator)
     documents = torch.randn(2, 2, 4, 8, generator=generator)
-    full = xtr_scores(queries, documents, k=4)
-    kd = xtr_kd_scores(queries, documents, k=4)
+    full = xtr_scores(queries, documents, top_k=4)
+    kd = xtr_kd_scores(queries, documents, top_k=4)
     assert kd.shape == (2, 2)
     assert torch.equal(kd, torch.stack([full[0, 0:2], full[1, 2:4]]))
 
@@ -1450,7 +1450,7 @@ def test_xtr_scores_chunk_budget_matches_single_matmul() -> None:
     generator = torch.Generator().manual_seed(7)
     queries = torch.randn(2, 3, 8, generator=generator)
     documents = torch.randn(2, 2, 5, 8, generator=generator)
-    unchunked = xtr_scores(queries, documents, k=6)
+    unchunked = xtr_scores(queries, documents, top_k=6)
     for budget in (1, 200, 10**9):
-        chunked = xtr_scores(queries, documents, k=6, document_chunk_elements=budget)
+        chunked = xtr_scores(queries, documents, top_k=6, document_chunk_elements=budget)
         assert torch.allclose(unchunked, chunked, atol=1e-6), f"budget={budget}"

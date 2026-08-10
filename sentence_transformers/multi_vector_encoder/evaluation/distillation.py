@@ -29,8 +29,8 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
       2-D teacher scores. Both metrics are computed per query, so they track the training loss: the KL
       divergence over each query's own candidate set (with the same optional min-max normalization and
       ``temperature`` handling as the loss, averaged over queries, so with the loss's temperature the
-      reported KL matches the training loss at its default ``size_average=True``) and the Spearman as
-      the mean of the per-query rank correlations.
+      reported KL matches the training loss) and the Spearman as the mean of the per-query rank
+      correlations.
     - **Flat pairs**: one document per query with 1-D scores. A per-query distribution or ranking is
       undefined here, so the KL softmaxes over the whole dataset as a single distribution and reports
       the full divergence (a sum over pairs, not divided by their number, and not comparable to the
@@ -60,8 +60,7 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
         temperature: Temperature dividing the teacher scores and (normalized) student scores before
             the softmax, with the KL scaled by ``temperature ** 2``, exactly as in
             ``MultiVectorDistillKLDivLoss``. Set it to the training loss's temperature so the
-            per-query KL matches the training loss at its default ``size_average=True``. Must be > 0.
-            Defaults to 1.0.
+            per-query KL matches the training loss. Must be > 0. Defaults to 1.0.
         name: Optional run name appended to CSV filenames.
         batch_size: Batch size for encoding.
         show_progress_bar: Whether to show a progress bar.
@@ -145,7 +144,7 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
         self.show_progress_bar = show_progress_bar
         self.write_csv = write_csv
 
-        self.csv_file = "multi_vector_distillation_evaluation" + (f"_{name}" if name else "") + "_results.csv"
+        self.csv_file = "distillation_evaluation" + (f"_{name}" if name else "") + "_results.csv"
         self.csv_headers = ["epoch", "steps", "kl_divergence", "spearman"]
 
     def __call__(

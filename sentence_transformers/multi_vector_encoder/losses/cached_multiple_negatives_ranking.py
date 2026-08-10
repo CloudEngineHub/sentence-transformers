@@ -40,6 +40,11 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
 
     Args:
         model: A :class:`~sentence_transformers.MultiVectorEncoder`.
+        scale: ``1 / temperature``. Scores are multiplied by ``scale`` before cross-entropy. Defaults to
+            ``1.0`` (``temperature=1.0``), matching PyLate. MaxSim is an unbounded sum over query-token
+            similarities, so (unlike bounded cosine, where the dense loss uses ``scale=20.0``) it needs no
+            amplification. ``scale=20`` would saturate the softmax. See
+            :class:`MultiVectorMultipleNegativesRankingLoss` for the full rationale.
         similarity_fct: Scoring callable. Defaults to
             :func:`~sentence_transformers.multi_vector_encoder.scoring.colbert_scores`. Pass
             :class:`~sentence_transformers.multi_vector_encoder.scoring.XTRScores` for XTR-style scoring.
@@ -52,12 +57,6 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
         score_mini_batch_size: Chunk size for the **scoring** phase (independent of ``mini_batch_size``).
             Smaller values trim transient scoring intermediates ``(Q, Q*N, q_tokens, d_tokens)`` which are
             usually the bottleneck at large effective batch sizes. Defaults to ``mini_batch_size``.
-        scale: ``1 / temperature``. Scores are multiplied by ``scale`` before cross-entropy. Defaults to
-            ``1.0`` (``temperature=1.0``), matching PyLate. MaxSim is an unbounded sum over query-token
-            similarities, so (unlike bounded cosine, where the dense loss uses ``scale=20.0``) it needs no
-            amplification. ``scale=20`` would saturate the softmax. See
-            :class:`MultiVectorMultipleNegativesRankingLoss` for the full rationale.
-        size_average: Whether to average (``True``, default) or sum the cross-entropy loss across the batch.
         gather_across_devices: If True, AllGather document embeddings across DDP ranks.
         show_progress_bar: If True, show a TQDM progress bar for the embedding / scoring steps.
 
@@ -102,12 +101,11 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
     def __init__(
         self,
         model: MultiVectorEncoder,
+        scale: float = 1.0,
         similarity_fct: Callable | None = None,
         mini_batch_size: int = 32,
         mini_batch_num_tokens: int | None = None,
         score_mini_batch_size: int | None = None,
-        scale: float = 1.0,
-        size_average: bool = True,
         gather_across_devices: bool = False,
         show_progress_bar: bool = False,
     ) -> None:
@@ -116,12 +114,11 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
         if scale <= 0:
             raise ValueError("Scale must be a positive value.")
         self.model = model
+        self.scale = scale
         self.similarity_fct = similarity_fct if similarity_fct is not None else colbert_scores
         self.mini_batch_size = mini_batch_size
         self.mini_batch_num_tokens = mini_batch_num_tokens
         self.score_mini_batch_size = score_mini_batch_size if score_mini_batch_size is not None else mini_batch_size
-        self.scale = scale
-        self.size_average = size_average
         self.gather_across_devices = gather_across_devices
         self.show_progress_bar = show_progress_bar
 
@@ -133,12 +130,11 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
             args = ", ".join(f"{key}={value!r}" for key, value in metric_config().items())
             similarity_fct = f"{similarity_fct}({args})"
         return {
+            "scale": self.scale,
             "similarity_fct": similarity_fct,
             "mini_batch_size": self.mini_batch_size,
             "mini_batch_num_tokens": self.mini_batch_num_tokens,
             "score_mini_batch_size": self.score_mini_batch_size,
-            "scale": self.scale,
-            "size_average": self.size_average,
             "gather_across_devices": self.gather_across_devices,
         }
 
@@ -235,8 +231,7 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
             )
             loss_mb = F.cross_entropy(scores * self.scale, labels[begin:end], reduction="sum")
             # Average inside the graph: dividing the detached sum after backward would leave gradients scaled by batch_size.
-            if self.size_average:
-                loss_mb = loss_mb / batch_size
+            loss_mb = loss_mb / batch_size
             if with_backward:
                 loss_mb.backward()
                 loss_mb = loss_mb.detach()

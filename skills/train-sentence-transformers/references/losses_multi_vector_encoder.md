@@ -29,7 +29,7 @@ loss = MultiVectorMultipleNegativesRankingLoss(model=model)  # scale=1.0 (temper
 
 - **Data**: `(anchor, positive)` or `(anchor, positive, negative_1, ..., negative_n)`. The collator stamps each column's task (column 0 becomes query, others become document). Pass `task=...` on a column to override.
 - Set `batch_sampler=BatchSamplers.NO_DUPLICATES` on training args (same reason as bi-encoder MNRL).
-- `similarity_fct=colbert_scores` by default. Pass `XTRScores(k=...)` for the sparser XTR-style scoring (from `sentence_transformers.multi_vector_encoder.scoring`). XTR applies to training only: evaluation always scores with MaxSim (see Gotchas).
+- `similarity_fct=colbert_scores` by default. Pass `XTRScores(top_k=...)` for the sparser XTR-style scoring (from `sentence_transformers.multi_vector_encoder.scoring`). XTR applies to training only: evaluation always scores with MaxSim (see Gotchas).
 - `scale=1.0` (temperature=1.0) matches PyLate and is correct for MaxSim. **Do NOT set `scale=20.0`**, which saturates the softmax and destroys learning.
 
 ### `CachedMultiVectorMultipleNegativesRankingLoss`
@@ -63,10 +63,10 @@ Regress the **margin** between positive and negative MaxSim scores against the t
 loss = MultiVectorMarginMSELoss(model=model)
 ```
 
-- **Data**: `(query, positive, negative, score_diff)` where `score_diff = teacher_score(query, positive) - teacher_score(query, negative)`.
+- **Data**: `(query, positive, negative, score_diff)` where `score_diff = teacher_score(query, positive) - teacher_score(query, negative)`. Raw teacher scores `[score(q, pos), score(q, neg_1), ...]` also work, converted to margins internally.
 - Popular recipe from PyLate / colpali-engine.
 - Teacher scores are precomputed once, stored as the label column. The loss does not run the teacher inline.
-- The scoring override here is `similarity_fct` (defaults to `maxsim_pairwise`), not the `similarity_fct` used by the MNRL and KLDiv losses.
+- Same `similarity_fct` convention as the other losses, but pairwise-shaped: defaults to `colbert_scores_pairwise`, or pass `xtr_scores_pairwise` for XTR.
 
 ### `MultiVectorDistillKLDivLoss`
 

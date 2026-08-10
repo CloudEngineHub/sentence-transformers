@@ -198,7 +198,7 @@ class TestModelCardDataDefaults:
                 "scores them with late interaction (MaxSim)",
                 "useful for semantic search with late interaction",
                 "- **Model Type:** Multi-Vector Encoder",
-                "**Similarity Function:** maxsim",
+                "**Similarity Function:** MaxSim",
                 "#### Unnamed Dataset",
                 " | <code>anchor 1</code> | <code>positive 1</code> | <code>negative 1</code> |",
                 "* Loss: [<code>MultiVectorMultipleNegativesRankingLoss</code>]",

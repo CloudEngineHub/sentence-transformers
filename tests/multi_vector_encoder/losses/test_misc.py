@@ -112,11 +112,10 @@ def test_cached_mnr_slices_flattened_vlm_inputs_grid_aware() -> None:
     assert torch.isfinite(value)
 
 
-@pytest.mark.parametrize("size_average", [True, False])
-def test_cached_mnr_gradients_match_non_cached(size_average: bool) -> None:
+def test_cached_mnr_gradients_match_non_cached() -> None:
     """GradCache's contract is gradient equivalence with the non-cached loss. Regression pin for
-    the sum-vs-mean defect: with ``size_average=True`` the per-chunk backward used to run on the
-    un-averaged sum, silently scaling every gradient by ``batch_size`` while reporting the mean."""
+    the per-chunk backward normalization: it must run on the batch-averaged loss inside the graph,
+    or every gradient is silently scaled by ``batch_size`` while the mean is reported."""
     batch, dim = 6, 8
 
     def build_features() -> list[dict[str, Tensor]]:
@@ -127,15 +126,13 @@ def test_cached_mnr_gradients_match_non_cached(size_average: bool) -> None:
         ]
 
     plain_features = build_features()
-    plain_loss = mve_losses.MultiVectorMultipleNegativesRankingLoss(
-        model=_PassthroughModel(), size_average=size_average
-    )
+    plain_loss = mve_losses.MultiVectorMultipleNegativesRankingLoss(model=_PassthroughModel())
     plain_value = plain_loss(plain_features, labels=None)
     plain_value.backward()
 
     cached_features = build_features()
     cached_loss = mve_losses.CachedMultiVectorMultipleNegativesRankingLoss(
-        model=_PassthroughModel(), mini_batch_size=2, size_average=size_average, show_progress_bar=False
+        model=_PassthroughModel(), mini_batch_size=2, show_progress_bar=False
     )
     cached_value = cached_loss(cached_features, labels=None)
     cached_value.backward()
@@ -158,8 +155,7 @@ def _make_ragged_feature(lengths: list[int], dim: int, seed: int) -> dict[str, T
     return {"token_embeddings": emb, "attention_mask": mask}
 
 
-@pytest.mark.parametrize("size_average", [True, False])
-def test_cached_mnr_token_budget_matches_non_cached(size_average: bool) -> None:
+def test_cached_mnr_token_budget_matches_non_cached() -> None:
     """``mini_batch_num_tokens`` packs mini-batches by real token count rather than by sequence count,
     which must not change the loss or the gradients. Padded positions dropped by the mini-batch pad
     trimming are masked out anyway, so both paths have to agree exactly."""
@@ -180,9 +176,7 @@ def test_cached_mnr_token_budget_matches_non_cached(size_average: bool) -> None:
     assert len({end - begin for begin, end in ranges}) > 1, f"expected uneven mini-batches, got {ranges}"
 
     plain_features = build_features()
-    plain_loss = mve_losses.MultiVectorMultipleNegativesRankingLoss(
-        model=_PassthroughModel(), size_average=size_average
-    )
+    plain_loss = mve_losses.MultiVectorMultipleNegativesRankingLoss(model=_PassthroughModel())
     plain_value = plain_loss(plain_features, labels=None)
     plain_value.backward()
 
@@ -190,7 +184,6 @@ def test_cached_mnr_token_budget_matches_non_cached(size_average: bool) -> None:
     cached_loss = mve_losses.CachedMultiVectorMultipleNegativesRankingLoss(
         model=_PassthroughModel(),
         mini_batch_num_tokens=10,
-        size_average=size_average,
         show_progress_bar=False,
     )
     cached_value = cached_loss(cached_features, labels=None)
@@ -406,23 +399,23 @@ def test_losses_read_scoring_mask_from_model_output() -> None:
 
 
 def test_similarity_fct_config_includes_hyperparameters() -> None:
-    """Configured metric objects serialize with their hyperparameters, so ``XTRScores(k=16)`` and
-    ``XTRScores(k=256)`` are distinguishable in model cards and logs. Plain functions keep
+    """Configured metric objects serialize with their hyperparameters, so ``XTRScores(top_k=16)`` and
+    ``XTRScores(top_k=256)`` are distinguishable in model cards and logs. Plain functions keep
     serializing as their bare name."""
     from sentence_transformers.multi_vector_encoder.scoring import XTRKDScores, XTRScores
 
     loss = mve_losses.MultiVectorMultipleNegativesRankingLoss(
-        model=_PassthroughModel(), similarity_fct=XTRScores(k=16)
+        model=_PassthroughModel(), similarity_fct=XTRScores(top_k=16)
     )
-    assert loss.get_config_dict()["similarity_fct"] == "XTRScores(k=16, document_chunk_elements=None)"
+    assert loss.get_config_dict()["similarity_fct"] == "XTRScores(top_k=16, document_chunk_elements=None)"
 
     cached = mve_losses.CachedMultiVectorMultipleNegativesRankingLoss(
-        model=_PassthroughModel(), similarity_fct=XTRScores(k=16, document_chunk_elements=4)
+        model=_PassthroughModel(), similarity_fct=XTRScores(top_k=16, document_chunk_elements=4)
     )
-    assert cached.get_config_dict()["similarity_fct"] == "XTRScores(k=16, document_chunk_elements=4)"
+    assert cached.get_config_dict()["similarity_fct"] == "XTRScores(top_k=16, document_chunk_elements=4)"
 
-    kd = mve_losses.MultiVectorDistillKLDivLoss(model=_PassthroughModel(), similarity_fct=XTRKDScores(k=8))
-    assert kd.get_config_dict()["similarity_fct"] == "XTRKDScores(k=8, document_chunk_elements=None)"
+    kd = mve_losses.MultiVectorDistillKLDivLoss(model=_PassthroughModel(), similarity_fct=XTRKDScores(top_k=8))
+    assert kd.get_config_dict()["similarity_fct"] == "XTRKDScores(top_k=8, document_chunk_elements=None)"
 
     default = mve_losses.MultiVectorMultipleNegativesRankingLoss(model=_PassthroughModel())
     assert default.get_config_dict()["similarity_fct"] == "colbert_scores"
