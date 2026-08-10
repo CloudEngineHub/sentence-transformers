@@ -30,7 +30,7 @@ class MultiVectorDistillKLDivLoss(nn.Module):
 
     Args:
         model: A :class:`~sentence_transformers.MultiVectorEncoder`.
-        score_metric: Callable that, given queries ``(Q, q_tokens, dim)`` and stacked docs
+        similarity_fct: Callable that, given queries ``(Q, q_tokens, dim)`` and stacked docs
             ``(Q, N, d_tokens, dim)``, returns ``(Q, N)`` scores. Defaults to
             :func:`~sentence_transformers.multi_vector_encoder.scoring.colbert_kd_scores`. Pass
             :class:`~sentence_transformers.multi_vector_encoder.scoring.XTRKDScores` for XTR-style scoring.
@@ -79,7 +79,7 @@ class MultiVectorDistillKLDivLoss(nn.Module):
     def __init__(
         self,
         model: MultiVectorEncoder,
-        score_metric: Callable | None = None,
+        similarity_fct: Callable | None = None,
         size_average: bool = True,
         normalize_scores: bool = True,
         temperature: float = 1.0,
@@ -87,7 +87,7 @@ class MultiVectorDistillKLDivLoss(nn.Module):
     ) -> None:
         super().__init__()
         self.model = model
-        self.score_metric = score_metric if score_metric is not None else colbert_kd_scores
+        self.similarity_fct = similarity_fct if similarity_fct is not None else colbert_kd_scores
         self.normalize_scores = normalize_scores
         self.temperature = temperature
         self.size_average = size_average
@@ -95,14 +95,14 @@ class MultiVectorDistillKLDivLoss(nn.Module):
         self.loss_function = nn.KLDivLoss(reduction="batchmean" if size_average else "sum", log_target=True)
 
     def get_config_dict(self) -> dict[str, Any]:
-        score_metric = getattr(self.score_metric, "__name__", type(self.score_metric).__name__)
+        similarity_fct = getattr(self.similarity_fct, "__name__", type(self.similarity_fct).__name__)
         # Configured metric objects (e.g. XTRKDScores) expose their own config, include it.
-        metric_config = getattr(self.score_metric, "get_config_dict", None)
+        metric_config = getattr(self.similarity_fct, "get_config_dict", None)
         if metric_config is not None:
             args = ", ".join(f"{key}={value!r}" for key, value in metric_config().items())
-            score_metric = f"{score_metric}({args})"
+            similarity_fct = f"{similarity_fct}({args})"
         return {
-            "score_metric": score_metric,
+            "similarity_fct": similarity_fct,
             "normalize_scores": self.normalize_scores,
             "temperature": self.temperature,
             "size_average": self.size_average,
@@ -142,7 +142,7 @@ class MultiVectorDistillKLDivLoss(nn.Module):
             *embed_columns_padded(self.model, sentence_features[1:], self.mini_batch_size, task_default="document")
         )
 
-        scores = self.score_metric(
+        scores = self.similarity_fct(
             queries_embeddings,
             documents_embeddings,
             queries_mask=queries_mask,

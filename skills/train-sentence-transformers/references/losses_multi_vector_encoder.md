@@ -29,7 +29,7 @@ loss = MultiVectorMultipleNegativesRankingLoss(model=model)  # scale=1.0 (temper
 
 - **Data**: `(anchor, positive)` or `(anchor, positive, negative_1, ..., negative_n)`. The collator stamps each column's task (column 0 becomes query, others become document). Pass `task=...` on a column to override.
 - Set `batch_sampler=BatchSamplers.NO_DUPLICATES` on training args (same reason as bi-encoder MNRL).
-- `score_metric=colbert_scores` by default. Pass `XTRScores(k=...)` for the sparser XTR-style scoring (from `sentence_transformers.multi_vector_encoder.scoring`). XTR applies to training only: evaluation always scores with MaxSim (see Gotchas).
+- `similarity_fct=colbert_scores` by default. Pass `XTRScores(k=...)` for the sparser XTR-style scoring (from `sentence_transformers.multi_vector_encoder.scoring`). XTR applies to training only: evaluation always scores with MaxSim (see Gotchas).
 - `scale=1.0` (temperature=1.0) matches PyLate and is correct for MaxSim. **Do NOT set `scale=20.0`**, which saturates the softmax and destroys learning.
 
 ### `CachedMultiVectorMultipleNegativesRankingLoss`
@@ -66,7 +66,7 @@ loss = MultiVectorMarginMSELoss(model=model)
 - **Data**: `(query, positive, negative, score_diff)` where `score_diff = teacher_score(query, positive) - teacher_score(query, negative)`.
 - Popular recipe from PyLate / colpali-engine.
 - Teacher scores are precomputed once, stored as the label column. The loss does not run the teacher inline.
-- The scoring override here is `similarity_fct` (defaults to `maxsim_pairwise`), not the `score_metric` used by the MNRL and KLDiv losses.
+- The scoring override here is `similarity_fct` (defaults to `maxsim_pairwise`), not the `similarity_fct` used by the MNRL and KLDiv losses.
 
 ### `MultiVectorDistillKLDivLoss`
 
@@ -78,7 +78,7 @@ loss = MultiVectorDistillKLDivLoss(model=model)
 
 - **Data**: `(query, document_1, ..., document_N, scores)` where `scores` is a list of N teacher scores per row. One column per candidate document (the standard positional multi-column convention), and the label column must use a recognized name (`label`, `labels`, `score`, `scores`). `resolve_ids` expands a stored ID list into the numbered columns.
 - Stronger training signal than `MarginMSE` when you have full `N`-way teacher scores (not just positive/negative margins).
-- `score_metric` defaults to `colbert_kd_scores`, the listwise KD variant, not the `colbert_scores` used by the MNRL family. `XTRKDScores` is the XTR counterpart.
+- `similarity_fct` defaults to `colbert_kd_scores`, the listwise KD variant, not the `colbert_scores` used by the MNRL family. `XTRKDScores` is the XTR counterpart.
 - `temperature` softens both distributions before the softmax, and the loss is scaled by `temperature ** 2` so gradient magnitudes stay comparable across temperatures. `normalize_scores=True` min-max normalises the student scores along the `N` dimension first.
 - **OOM**: drop `per_device_train_batch_size` first and raise `gradient_accumulation_steps` to hold the effective batch. Only reduce `N` (candidate-list length) as a last resort, since lowering N changes the experiment.
 
@@ -94,5 +94,5 @@ loss = MultiVectorDistillKLDivLoss(model=model)
 - **Missing `Normalize` at the token level in the pipeline**: `colbert_scores` assumes L2-normalized token embeddings. If your custom pipeline drops the token-level `Normalize`, either add one or pass `normalize_embeddings=True` semantics via a wrapper.
 - **`CachedMultiVectorMultipleNegativesRankingLoss` + `gradient_checkpointing=True`**: crash. Pick one.
 - **`MultiVectorMarginMSELoss` without precomputed `score_diff`**: label column must be populated from a teacher pass ahead of training. The loss does not compute the teacher inline.
-- **Expecting XTR scoring at eval**: `XTRScores` is a train-only `score_metric`. XTR takes its top-k across the whole candidate set, so a `(query, document)` pair has no standalone score, which means it cannot be the model's `similarity_fn_name` and the evaluators reject it outright. Evaluation and inference score with MaxSim, also for XTR-trained models. That is by design, not a mismatch to fix. To score a fixed candidate set ad hoc, call `xtr_scores` directly.
+- **Expecting XTR scoring at eval**: `XTRScores` is a train-only `similarity_fct`. XTR takes its top-k across the whole candidate set, so a `(query, document)` pair has no standalone score, which means it cannot be the model's `similarity_fn_name` and the evaluators reject it outright. Evaluation and inference score with MaxSim, also for XTR-trained models. That is by design, not a mismatch to fix. To score a fixed candidate set ad hoc, call `xtr_scores` directly.
 - **Distillation with a weak teacher**: multi-vector students easily match a small-model teacher and then plateau. Use a strong cross-encoder (e.g. `gte-modernbert-base`, `mxbai-rerank-large-v2`) for the teacher pass.

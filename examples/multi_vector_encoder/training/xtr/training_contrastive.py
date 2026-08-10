@@ -2,7 +2,7 @@
 This script demonstrates how to train an XTR-style multi-vector retriever on MS MARCO triplets.
 
 This is identical to the ColBERT-style contrastive recipe (../msmarco/training_contrastive.py) except for the score
-metric: we pass `score_metric=XTRScores()` to switch from ColBERT-style MaxSim scoring to XTR-style global top-k token
+metric: we pass `similarity_fct=XTRScores()` to switch from ColBERT-style MaxSim scoring to XTR-style global top-k token
 scoring. The same losses, trainer, evaluator, and data pipeline work for both.
 
 As dataset, we use sentence-transformers/msmarco-bm25, which has (query, positive, negative) triplets with BM25-mined
@@ -62,7 +62,7 @@ def main():
 
     # 3. Define our training loss. Same loss class as the ColBERT recipe. We only swap the scoring callable for
     # XTRScores, which keeps the top-k token matches per query token across all in-batch documents.
-    loss = MultiVectorMultipleNegativesRankingLoss(model=model, score_metric=XTRScores(k=256))
+    loss = MultiVectorMultipleNegativesRankingLoss(model=model, similarity_fct=XTRScores(k=256))
 
     # 4. Define the evaluator. We use the MultiVectorNanoBEIREvaluator, which is a light-weight evaluator for English
     # (retrieval is scored with MaxSim, the standard late-interaction inference, regardless of the training score metric)

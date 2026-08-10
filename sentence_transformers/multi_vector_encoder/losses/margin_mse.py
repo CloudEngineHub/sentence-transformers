@@ -8,7 +8,7 @@ from torch import Tensor, nn
 
 from sentence_transformers.base.losses.merged_forward import embed_columns_padded
 from sentence_transformers.multi_vector_encoder.model import MultiVectorEncoder
-from sentence_transformers.util.similarity import maxsim_pairwise
+from sentence_transformers.multi_vector_encoder.scoring import colbert_scores_pairwise
 
 
 class MultiVectorMarginMSELoss(nn.Module):
@@ -29,8 +29,12 @@ class MultiVectorMarginMSELoss(nn.Module):
 
     Args:
         model: A :class:`~sentence_transformers.MultiVectorEncoder`.
-        similarity_fct: A pairwise scoring function. Defaults to
-            :func:`~sentence_transformers.util.maxsim_pairwise`.
+        similarity_fct: A pairwise scoring function, called as ``similarity_fct(queries_embeddings,
+            documents_embeddings, queries_mask=..., documents_mask=...)`` like in the other
+            multi-vector losses. Defaults to
+            :func:`~sentence_transformers.multi_vector_encoder.scoring.colbert_scores_pairwise`.
+            Pass :func:`~sentence_transformers.multi_vector_encoder.scoring.xtr_scores_pairwise`
+            for XTR-style scoring.
         size_average: ``True`` (default) averages the MSE across the batch. ``False`` sums.
         mini_batch_size: Maximum number of rows per model forward. The merged document batch is
             split into row chunks, each re-trimmed to its own longest document, so a single long
@@ -75,7 +79,7 @@ class MultiVectorMarginMSELoss(nn.Module):
     ) -> None:
         super().__init__()
         self.model = model
-        self.similarity_fct = similarity_fct if similarity_fct is not None else maxsim_pairwise
+        self.similarity_fct = similarity_fct if similarity_fct is not None else colbert_scores_pairwise
         self.size_average = size_average
         self.mini_batch_size = mini_batch_size
         self.loss_function = nn.MSELoss(reduction="mean" if size_average else "sum")
@@ -96,7 +100,9 @@ class MultiVectorMarginMSELoss(nn.Module):
     def _score(
         self, query_embeddings: Tensor, document_embeddings: Tensor, query_mask: Tensor, document_mask: Tensor
     ) -> Tensor:
-        return self.similarity_fct(query_embeddings, document_embeddings, a_mask=query_mask, b_mask=document_mask)
+        return self.similarity_fct(
+            query_embeddings, document_embeddings, queries_mask=query_mask, documents_mask=document_mask
+        )
 
     def forward(
         self,

@@ -40,7 +40,7 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
 
     Args:
         model: A :class:`~sentence_transformers.MultiVectorEncoder`.
-        score_metric: Scoring callable. Defaults to
+        similarity_fct: Scoring callable. Defaults to
             :func:`~sentence_transformers.multi_vector_encoder.scoring.colbert_scores`. Pass
             :class:`~sentence_transformers.multi_vector_encoder.scoring.XTRScores` for XTR-style scoring.
         mini_batch_size: Chunk size for the **embedding** forward / backward pass. Keep small enough that a
@@ -102,7 +102,7 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
     def __init__(
         self,
         model: MultiVectorEncoder,
-        score_metric: Callable | None = None,
+        similarity_fct: Callable | None = None,
         mini_batch_size: int = 32,
         mini_batch_num_tokens: int | None = None,
         score_mini_batch_size: int | None = None,
@@ -116,7 +116,7 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
         if scale <= 0:
             raise ValueError("Scale must be a positive value.")
         self.model = model
-        self.score_metric = score_metric if score_metric is not None else colbert_scores
+        self.similarity_fct = similarity_fct if similarity_fct is not None else colbert_scores
         self.mini_batch_size = mini_batch_size
         self.mini_batch_num_tokens = mini_batch_num_tokens
         self.score_mini_batch_size = score_mini_batch_size if score_mini_batch_size is not None else mini_batch_size
@@ -126,14 +126,14 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
         self.show_progress_bar = show_progress_bar
 
     def get_config_dict(self) -> dict[str, Any]:
-        score_metric = getattr(self.score_metric, "__name__", type(self.score_metric).__name__)
+        similarity_fct = getattr(self.similarity_fct, "__name__", type(self.similarity_fct).__name__)
         # Configured metric objects (e.g. XTRScores) expose their own config, include it.
-        metric_config = getattr(self.score_metric, "get_config_dict", None)
+        metric_config = getattr(self.similarity_fct, "get_config_dict", None)
         if metric_config is not None:
             args = ", ".join(f"{key}={value!r}" for key, value in metric_config().items())
-            score_metric = f"{score_metric}({args})"
+            similarity_fct = f"{similarity_fct}({args})"
         return {
-            "score_metric": score_metric,
+            "similarity_fct": similarity_fct,
             "mini_batch_size": self.mini_batch_size,
             "mini_batch_num_tokens": self.mini_batch_num_tokens,
             "score_mini_batch_size": self.score_mini_batch_size,
@@ -227,7 +227,7 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
             0, batch_size, self.score_mini_batch_size, desc="Score mini-batches", disable=not self.show_progress_bar
         ):
             end = begin + self.score_mini_batch_size
-            scores = self.score_metric(
+            scores = self.similarity_fct(
                 embeddings_anchor[begin:end],
                 docs_stacked,
                 queries_mask=q_mask[begin:end],

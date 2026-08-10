@@ -405,25 +405,27 @@ def test_losses_read_scoring_mask_from_model_output() -> None:
     assert abs(baseline - corrupted) < 1e-5, f"DistillKLDiv read the input mask: {baseline} vs {corrupted}"
 
 
-def test_score_metric_config_includes_hyperparameters() -> None:
+def test_similarity_fct_config_includes_hyperparameters() -> None:
     """Configured metric objects serialize with their hyperparameters, so ``XTRScores(k=16)`` and
     ``XTRScores(k=256)`` are distinguishable in model cards and logs. Plain functions keep
     serializing as their bare name."""
     from sentence_transformers.multi_vector_encoder.scoring import XTRKDScores, XTRScores
 
-    loss = mve_losses.MultiVectorMultipleNegativesRankingLoss(model=_PassthroughModel(), score_metric=XTRScores(k=16))
-    assert loss.get_config_dict()["score_metric"] == "XTRScores(k=16, document_chunk_size=None)"
+    loss = mve_losses.MultiVectorMultipleNegativesRankingLoss(
+        model=_PassthroughModel(), similarity_fct=XTRScores(k=16)
+    )
+    assert loss.get_config_dict()["similarity_fct"] == "XTRScores(k=16, document_chunk_elements=None)"
 
     cached = mve_losses.CachedMultiVectorMultipleNegativesRankingLoss(
-        model=_PassthroughModel(), score_metric=XTRScores(k=16, document_chunk_size=4)
+        model=_PassthroughModel(), similarity_fct=XTRScores(k=16, document_chunk_elements=4)
     )
-    assert cached.get_config_dict()["score_metric"] == "XTRScores(k=16, document_chunk_size=4)"
+    assert cached.get_config_dict()["similarity_fct"] == "XTRScores(k=16, document_chunk_elements=4)"
 
-    kd = mve_losses.MultiVectorDistillKLDivLoss(model=_PassthroughModel(), score_metric=XTRKDScores(k=8))
-    assert kd.get_config_dict()["score_metric"] == "XTRKDScores(k=8, document_chunk_size=None)"
+    kd = mve_losses.MultiVectorDistillKLDivLoss(model=_PassthroughModel(), similarity_fct=XTRKDScores(k=8))
+    assert kd.get_config_dict()["similarity_fct"] == "XTRKDScores(k=8, document_chunk_elements=None)"
 
     default = mve_losses.MultiVectorMultipleNegativesRankingLoss(model=_PassthroughModel())
-    assert default.get_config_dict()["score_metric"] == "colbert_scores"
+    assert default.get_config_dict()["similarity_fct"] == "colbert_scores"
 
 
 def test_mnr_gather_across_devices_single_process_matches_no_gather(varlen_features) -> None:
@@ -683,3 +685,25 @@ def test_mnr_rejects_non_positive_scale(loss_class: type[nn.Module], scale: floa
     must reject both, matching the dense MultipleNegativesRankingLoss."""
     with pytest.raises(ValueError, match="Scale must be a positive value."):
         loss_class(model=_PassthroughModel(), scale=scale)
+
+
+def test_margin_mse_accepts_xtr_pairwise_metric() -> None:
+    """The unified similarity_fct convention makes xtr_scores_pairwise a drop-in MarginMSE scorer,
+    previously a TypeError from the a_mask/b_mask call."""
+    from sentence_transformers.multi_vector_encoder.scoring import xtr_scores_pairwise
+
+    batch, dim = 2, 8
+    features = [
+        _make_feature(t_tokens=6, batch=batch, dim=dim, seed=1),
+        _make_feature(t_tokens=10, batch=batch, dim=dim, seed=2),
+        _make_feature(t_tokens=12, batch=batch, dim=dim, seed=3),
+    ]
+    generator = torch.Generator().manual_seed(11)
+    margins = torch.randn(batch, generator=generator)
+
+    loss = mve_losses.MultiVectorMarginMSELoss(model=_PassthroughModel(), similarity_fct=xtr_scores_pairwise)
+    assert torch.isfinite(loss(features, margins))
+    assert loss.get_config_dict()["similarity_fct"] == "xtr_scores_pairwise"
+
+    default = mve_losses.MultiVectorMarginMSELoss(model=_PassthroughModel())
+    assert default.get_config_dict()["similarity_fct"] == "colbert_scores_pairwise"

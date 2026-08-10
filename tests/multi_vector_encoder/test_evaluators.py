@@ -52,7 +52,7 @@ def test_information_retrieval_evaluator_rejects_xtr_scoring() -> None:
     queries = {"q0": "What is the capital of France?"}
     corpus = {"d0": "Paris is the capital of France."}
     qrels = {"q0": {"d0"}}
-    for scorer in (xtr_scores, XTRScores(k=2), partial(xtr_scores, document_chunk_size=4)):
+    for scorer in (xtr_scores, XTRScores(k=2), partial(xtr_scores, document_chunk_elements=4)):
         with pytest.raises(ValueError, match="XTR"):
             MultiVectorInformationRetrievalEvaluator(
                 queries=queries,

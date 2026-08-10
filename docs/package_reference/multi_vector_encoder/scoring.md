@@ -1,13 +1,17 @@
 # Scoring
 
 `sentence_transformers.multi_vector_encoder.scoring` provides the late-interaction scoring functions
-used by training losses. Pass one of these (or a configured callable) as the ``score_metric``
+used by training losses. Pass one of these (or a configured callable) as the ``similarity_fct``
 parameter on the multi-vector losses to switch between ColBERT-style MaxSim and XTR-style global
 top-k scoring.
 
 ## ColBERT scoring
 ```{eval-rst}
 .. autofunction:: sentence_transformers.multi_vector_encoder.scoring.colbert_scores
+```
+
+```{eval-rst}
+.. autofunction:: sentence_transformers.multi_vector_encoder.scoring.colbert_scores_pairwise
 ```
 
 ```{eval-rst}

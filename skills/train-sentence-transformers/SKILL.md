@@ -85,7 +85,7 @@ These are non-negotiable contracts. Implementation lives in the production templ
 - Smoke-test before any long run (`max_steps=1` + tiny dataset slice). The production templates show one common pattern (`SMOKE_TEST` env var).
 - **[CrossEncoder]** Include `EarlyStoppingCallback(patience>=3)`. CE rerankers often peak mid-training and regress.
 - **[SparseEncoder]** Log `query_active_dims` / `corpus_active_dims` on the verdict line. High nDCG with collapsed sparsity is not a win. The keys come back name-prefixed (e.g. `..._query_active_dims`). Use suffix matching to pluck them. See the SPARSE production template for the exact pattern.
-- **[MultiVectorEncoder]** Keep `scale=1.0` on any MNRL-family loss. MaxSim is unbounded, so `scale=20.0` copied from bi-encoder MNRL saturates the softmax and destroys learning. `XTRScores` is a train-only `score_metric`: the evaluators reject it, so evaluation always scores with MaxSim, including for XTR-trained models.
+- **[MultiVectorEncoder]** Keep `scale=1.0` on any MNRL-family loss. MaxSim is unbounded, so `scale=20.0` copied from bi-encoder MNRL saturates the softmax and destroys learning. `XTRScores` is a train-only `similarity_fct`: the evaluators reject it, so evaluation always scores with MaxSim, including for XTR-trained models.
 
 ## 5. Workflow
 

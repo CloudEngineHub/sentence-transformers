@@ -749,7 +749,7 @@ def test_xtr_scores_clamps_topk_to_token_pool() -> None:
 
 
 def test_colbert_scores_keep_float32_through_delegation() -> None:
-    """The losses' default score_metric surface must keep maxsim's float32 scores, also under a
+    """The losses' default similarity_fct surface must keep maxsim's float32 scores, also under a
     future fused reimplementation. Also pins the KD block-diagonal relation to the full matrix."""
     from sentence_transformers.multi_vector_encoder.scoring import colbert_kd_scores, colbert_scores
 
@@ -1408,3 +1408,29 @@ def test_int8_embeddings_are_scoreable(model: MultiVectorEncoder) -> None:
     assert scores.shape == (1, 2)
     assert scores.dtype == torch.float32
     assert torch.isfinite(scores).all()
+
+
+def test_xtr_kd_scores_gathers_own_document_groups() -> None:
+    """xtr_kd_scores returns each query's own N-way block of the xtr_scores cross-product."""
+    from sentence_transformers.multi_vector_encoder.scoring import xtr_kd_scores, xtr_scores
+
+    generator = torch.Generator().manual_seed(5)
+    queries = torch.randn(2, 3, 8, generator=generator)
+    documents = torch.randn(2, 2, 4, 8, generator=generator)
+    full = xtr_scores(queries, documents, k=4)
+    kd = xtr_kd_scores(queries, documents, k=4)
+    assert kd.shape == (2, 2)
+    assert torch.equal(kd, torch.stack([full[0, 0:2], full[1, 2:4]]))
+
+
+def test_xtr_scores_chunk_budget_matches_single_matmul() -> None:
+    """document_chunk_elements is a pure memory knob: any budget reproduces the single matmul."""
+    from sentence_transformers.multi_vector_encoder.scoring import xtr_scores
+
+    generator = torch.Generator().manual_seed(7)
+    queries = torch.randn(2, 3, 8, generator=generator)
+    documents = torch.randn(2, 2, 5, 8, generator=generator)
+    unchunked = xtr_scores(queries, documents, k=6)
+    for budget in (1, 200, 10**9):
+        chunked = xtr_scores(queries, documents, k=6, document_chunk_elements=budget)
+        assert torch.allclose(unchunked, chunked, atol=1e-6), f"budget={budget}"

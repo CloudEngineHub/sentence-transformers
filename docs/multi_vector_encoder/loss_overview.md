@@ -3,14 +3,15 @@
 ```{eval-rst}
 All multi-vector losses embed both sides into token-level embeddings and score them with late
 interaction inside the loss. The scoring is swappable: the ranking and KD losses accept a
-``score_metric=`` kwarg that defaults to ColBERT-style MaxSim
+``similarity_fct=`` kwarg that defaults to ColBERT-style MaxSim
 (:func:`~sentence_transformers.multi_vector_encoder.scoring.colbert_scores`), and can be switched to
 XTR-style global top-k scoring by passing
 :class:`~sentence_transformers.multi_vector_encoder.scoring.XTRScores` (or
 :class:`~sentence_transformers.multi_vector_encoder.scoring.XTRKDScores` for the KD loss).
-:class:`~sentence_transformers.multi_vector_encoder.losses.MultiVectorMarginMSELoss` is the
-exception: it scores matched pairs with a pairwise ``similarity_fct`` (default
-:func:`~sentence_transformers.util.maxsim_pairwise`) instead.
+:class:`~sentence_transformers.multi_vector_encoder.losses.MultiVectorMarginMSELoss` scores matched
+pairs instead, with a pairwise ``similarity_fct`` (default
+:func:`~sentence_transformers.multi_vector_encoder.scoring.colbert_scores_pairwise`, or
+:func:`~sentence_transformers.multi_vector_encoder.scoring.xtr_scores_pairwise` for XTR).
 ```
 
 ## Loss Table

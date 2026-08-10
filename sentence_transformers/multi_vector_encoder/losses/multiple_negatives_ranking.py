@@ -22,13 +22,13 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
 
     For each query in the batch, the matched positive document is treated as the positive sample, and all
     other in-batch documents (plus any explicitly-provided hard negatives) serve as negatives. Scoring uses
-    MaxSim by default. Pass a different ``score_metric`` (e.g.
+    MaxSim by default. Pass a different ``similarity_fct`` (e.g.
     :class:`~sentence_transformers.multi_vector_encoder.scoring.XTRScores`) to switch scoring strategies
     without changing the loss.
 
     Args:
         model: A :class:`~sentence_transformers.MultiVectorEncoder` model.
-        score_metric: Scoring callable. Receives queries ``(Q, q_tokens, dim)`` and stacked documents
+        similarity_fct: Scoring callable. Receives queries ``(Q, q_tokens, dim)`` and stacked documents
             ``(Q, N, d_tokens, dim)`` and returns ``(Q, Q*N)`` with query-major ordering. Defaults to
             :func:`~sentence_transformers.multi_vector_encoder.scoring.colbert_scores`. Pass
             :class:`~sentence_transformers.multi_vector_encoder.scoring.XTRScores` for XTR-style scoring.
@@ -93,7 +93,7 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
     def __init__(
         self,
         model: MultiVectorEncoder,
-        score_metric: Callable | None = None,
+        similarity_fct: Callable | None = None,
         scale: float = 1.0,
         mini_batch_size: int | None = None,
         score_mini_batch_size: int | None = None,
@@ -104,7 +104,7 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
         if scale <= 0:
             raise ValueError("Scale must be a positive value.")
         self.model = model
-        self.score_metric = score_metric if score_metric is not None else colbert_scores
+        self.similarity_fct = similarity_fct if similarity_fct is not None else colbert_scores
         self.scale = scale
         self.mini_batch_size = mini_batch_size
         self.score_mini_batch_size = score_mini_batch_size
@@ -112,14 +112,14 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
         self.gather_across_devices = gather_across_devices
 
     def get_config_dict(self) -> dict[str, Any]:
-        score_metric = getattr(self.score_metric, "__name__", type(self.score_metric).__name__)
+        similarity_fct = getattr(self.similarity_fct, "__name__", type(self.similarity_fct).__name__)
         # Configured metric objects (e.g. XTRScores) expose their own config, include it.
-        metric_config = getattr(self.score_metric, "get_config_dict", None)
+        metric_config = getattr(self.similarity_fct, "get_config_dict", None)
         if metric_config is not None:
             args = ", ".join(f"{key}={value!r}" for key, value in metric_config().items())
-            score_metric = f"{score_metric}({args})"
+            similarity_fct = f"{similarity_fct}({args})"
         return {
-            "score_metric": score_metric,
+            "similarity_fct": similarity_fct,
             "scale": self.scale,
             "mini_batch_size": self.mini_batch_size,
             "score_mini_batch_size": self.score_mini_batch_size,
@@ -163,7 +163,7 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
         for begin in range(0, batch_size, step):
             end = begin + step
             score_chunks.append(
-                self.score_metric(
+                self.similarity_fct(
                     query_embeddings[begin:end],
                     docs_stacked,
                     queries_mask=q_mask[begin:end],

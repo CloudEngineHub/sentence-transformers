@@ -51,6 +51,24 @@ def colbert_kd_scores(
     )
 
 
+def colbert_scores_pairwise(
+    queries_embeddings: list | np.ndarray | torch.Tensor,
+    documents_embeddings: list | np.ndarray | torch.Tensor,
+    queries_mask: torch.Tensor | None = None,
+    documents_mask: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Pairwise ColBERT (MaxSim) scoring for matched ``(query_i, document_i)`` pairs.
+
+    Takes ``(batch_size, q_tokens, dim)`` query embeddings and ``(batch_size, d_tokens, dim)`` document
+    embeddings and returns a ``(batch_size,)`` float32 score vector, one MaxSim score per pair. A thin
+    delegation to :func:`~sentence_transformers.util.similarity.maxsim_pairwise` with the scoring
+    package's keyword convention, interchangeable with
+    :func:`~sentence_transformers.multi_vector_encoder.scoring.xtr_scores_pairwise` as the
+    ``similarity_fct`` of :class:`~sentence_transformers.multi_vector_encoder.losses.MultiVectorMarginMSELoss`.
+    """
+    return maxsim_pairwise(queries_embeddings, documents_embeddings, a_mask=queries_mask, b_mask=documents_mask)
+
+
 def colbert_scores(
     queries_embeddings: list | np.ndarray | torch.Tensor,
     documents_embeddings: list | np.ndarray | torch.Tensor,
@@ -66,7 +84,7 @@ def colbert_scores(
     ``Q_query == Q_doc``, the positive for query ``i`` sits at column ``i*N``.
 
     The document axis is iterated group-by-group so that only one ``(Q_query, Q_doc, q_tokens, d_tokens)``
-    intermediate is live at a time. Pass this as ``score_metric`` to a
+    intermediate is live at a time. Pass this as ``similarity_fct`` to a
     :mod:`~sentence_transformers.multi_vector_encoder.losses` loss (the default), or
     :func:`~sentence_transformers.multi_vector_encoder.scoring.xtr_scores` for XTR-style scoring.
     """

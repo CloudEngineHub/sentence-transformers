@@ -169,7 +169,7 @@ Conventions for a feature-column module:
 - Place the module after ``Normalize`` in the pipeline, so the L2 normalization never sees the
   extra column.
 - Pair it with a scoring function that splits the column back off (e.g. slice ``[..., :-1]`` for the
-  embeddings and ``[..., -1]`` for the weights) and pass it as ``score_metric`` to the losses. The
+  embeddings and ``[..., -1]`` for the weights) and pass it as ``similarity_fct`` to the losses. The
   default MaxSim functions are channel-blind and would fold the extra column into the dot products.
 - Note that ``get_embedding_dimension()`` counts the extra columns, and ``precision`` quantization
   applies to them.
