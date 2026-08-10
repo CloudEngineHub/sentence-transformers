@@ -44,7 +44,8 @@ class MultiVectorMask(Module):
             calling :meth:`resolve_with_tokenizer` with the model's tokenizer.
         keep_only_token_ids: Allowlist of token IDs to keep in document scoring. Defaults to ``None``
             (no allowlist: every non-skiplisted real token is scored). Set this to the model's
-            image-patch token id (e.g. ``processor.image_token_id`` for ColPali / ColQwen2) to
+            image-patch token id (``processor.tokenizer.convert_tokens_to_ids(processor.image_token)``,
+            which works for both the ColPali and ColQwen2 families, unlike ``image_token_id``) to
             reproduce colpali-engine's ``mask_non_image_embeddings=True`` behaviour: only image
             patch embeddings contribute to MaxSim, roughly halving the document index size. The
             allowlist is applied in addition to the skiplist. ``input_ids`` must be present for it

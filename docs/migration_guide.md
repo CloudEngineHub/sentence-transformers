@@ -64,7 +64,7 @@ and the processor formats queries and image documents.
 | `processor.process_queries(...)` + `model(**batch)` | `model.encode_query(queries)` |
 | `processor.process_images(...)` + `model(**batch)` | `model.encode_document(images)` |
 | `processor.score_multi_vector(qs, ds)` | `model.similarity(query_embeddings, document_embeddings)` |
-| `mask_non_image_embeddings=True` | `MultiVectorMask(keep_only_token_ids=[processor.image_token_id])` |
+| `mask_non_image_embeddings=True` | `MultiVectorMask(keep_only_token_ids=[processor.tokenizer.convert_tokens_to_ids(processor.image_token)])` |
 | `HierarchicalTokenPooler` | `HierarchicalTokenPooling` (see its docstring for exact-parity notes) |
 | `colpali_engine.interpretability` | `sentence_transformers.multi_vector_encoder.interpretability` |
 
@@ -1072,7 +1072,7 @@ The :meth:`~sentence_transformers.sentence_transformer.model.SentenceTransformer
 ## Migrating from v3.x to v4.x
 
 ```{eval-rst}
-The v4 Sentence Transformers release refactored the training of :class:`~sentence_transformers.cross_encoder.model.CrossEncoder` reranker/pair classification models, replacing :meth:`CrossEncoder.fit <sentence_transformers.sentence_transformer.model.SentenceTransformer.fit>` with a :class:`~sentence_transformers.cross_encoder.trainer.CrossEncoderTrainer` and :class:`~sentence_transformers.cross_encoder..training_args.CrossEncoderTrainingArguments`. Like with v3 and :class:`~sentence_transformers.sentence_transformer.model.SentenceTransformer` models, this update softly deprecated :meth:`CrossEncoder.fit <sentence_transformers.cross_encoder.model.CrossEncoder.fit>`, meaning that it still works, but it's recommended to switch to the new v4.x training format. Behind the scenes, this method now uses the new trainer.
+The v4 Sentence Transformers release refactored the training of :class:`~sentence_transformers.cross_encoder.model.CrossEncoder` reranker/pair classification models, replacing :meth:`CrossEncoder.fit <sentence_transformers.sentence_transformer.model.SentenceTransformer.fit>` with a :class:`~sentence_transformers.cross_encoder.trainer.CrossEncoderTrainer` and :class:`~sentence_transformers.cross_encoder.training_args.CrossEncoderTrainingArguments`. Like with v3 and :class:`~sentence_transformers.sentence_transformer.model.SentenceTransformer` models, this update softly deprecated :meth:`CrossEncoder.fit <sentence_transformers.cross_encoder.model.CrossEncoder.fit>`, meaning that it still works, but it's recommended to switch to the new v4.x training format. Behind the scenes, this method now uses the new trainer.
 
 .. warning::
     If you don't have code that uses :meth:`CrossEncoder.fit <sentence_transformers.cross_encoder.model.CrossEncoder.fit>`, then you will not have to make any changes to your code to update from v3.x to v4.x.

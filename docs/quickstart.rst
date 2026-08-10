@@ -342,13 +342,13 @@ The usage for Multi-Vector Encoder models follows a similar pattern to Sentence 
       document_embeddings = model.encode_document(documents)
 
       # Each entry is a 2D array of shape (num_tokens_i, embedding_dim), variable-length per input.
-      print(query_embeddings[0].shape)  # e.g. (32, 128)
-      print(document_embeddings[0].shape)  # e.g. (7, 128) and (8, 128)
+      print(query_embeddings[0].shape)  # e.g. (10, 128)
+      print(document_embeddings[0].shape)  # e.g. (9, 128) and (10, 128)
 
       # 3. Score with MaxSim
       scores = model.similarity(query_embeddings, document_embeddings)
       print(scores)
-      # tensor([[16.6394, 13.3328]])
+      # tensor([[9.6037, 9.4055]])
 
 .. tab:: Multimodal
 
