@@ -1410,6 +1410,26 @@ def test_int8_embeddings_are_scoreable(model: MultiVectorEncoder) -> None:
     assert torch.isfinite(scores).all()
 
 
+def test_xtr_z_counts_retrieved_query_tokens() -> None:
+    """Z is the paper's retrieval count (query tokens that retrieved at least one document token),
+    not the count of positive maxima: 3 positive + 1 negative token divides by 4, and an all-negative
+    document divides by its retrieval count instead of the old 1e-3 clamp amplifying it 4000x."""
+    from sentence_transformers.multi_vector_encoder.scoring import xtr_scores
+
+    queries = torch.zeros(1, 4, 2)
+    queries[0, :3, 0] = 1.0
+    queries[0, 3, 0] = -1.0
+    documents = torch.zeros(1, 1, 3, 2)
+    documents[..., 0] = 0.5
+    scores = xtr_scores(queries, documents, k=3)
+    assert torch.allclose(scores, torch.tensor([[(3 * 0.5 - 0.5) / 4]]))
+
+    negative_queries = torch.full((1, 4, 8), -0.5)
+    negative_documents = torch.full((1, 2, 3, 8), 0.25)
+    scores = xtr_scores(negative_queries, negative_documents, k=6)
+    assert torch.allclose(scores, torch.full((1, 2), -1.0))
+
+
 def test_xtr_kd_scores_gathers_own_document_groups() -> None:
     """xtr_kd_scores returns each query's own N-way block of the xtr_scores cross-product."""
     from sentence_transformers.multi_vector_encoder.scoring import xtr_kd_scores, xtr_scores

@@ -23,6 +23,10 @@ def xtr_scores(
     The positive for query ``i`` sits at column ``i*N``. As in :func:`~sentence_transformers.util.similarity.maxsim`,
     the matmul runs in the input dtype and the per-query-token accumulation and returned scores are float32.
 
+    Each score is the sum of the query's retrieved per-token maxima divided by ``Z``, the number of
+    query tokens that retrieved at least one of the document's tokens (Lee et al. 2023, eq. 5). This
+    deviates from PyLate / PrimeQA, which divide by the count of positive per-token maxima instead.
+
     Args:
         queries_embeddings: ``(Q, q_tokens, dim)`` query embeddings.
         documents_embeddings: ``(Q, N, d_tokens, dim)`` stacked per-query document groups.
@@ -85,15 +89,22 @@ def xtr_scores(
     clubbed = scores.flatten(2, 3)
     top_values, indices = clubbed.topk(min(k, clubbed.shape[-1]), dim=-1, sorted=False)
     masked = torch.zeros_like(clubbed).scatter_(-1, indices, top_values)
+    # Paper-exact Z (Lee et al. 2023, eq. 5): the count of query tokens that retrieved at least one
+    # real token of the document. PyLate / PrimeQA count positive per-token maxima with a 1e-3 clamp
+    # instead, which amplifies all-negative rows over 1000x and diverges once top_k spans the token pool.
+    # Pad-slot retrievals (top_k spanning the pool) land in a throwaway Db-th bucket.
+    doc_ids = torch.where(docs_mask_flat.bool().reshape(-1)[indices], indices // Dt, Db)
+    alpha = torch.zeros(Qb, Qt, Db + 1, dtype=torch.bool, device=indices.device).scatter_(-1, doc_ids, True)[..., :Db]
     # fp32 accumulation like maxsim: summing per-token maxima in half precision collapses the
     # score grid (PyLate instead sums in the input dtype and casts the result).
     topk_scores_max = masked.view(Qb, Qt, Db, Dt).max(dim=-1).values.float()
 
     if queries_mask is not None:
         topk_scores_max = topk_scores_max * queries_mask.unsqueeze(-1)
+        alpha = alpha & queries_mask.bool().unsqueeze(-1)
 
     scores_sum = topk_scores_max.sum(dim=1)
-    Z = topk_scores_max.gt(0).float().sum(dim=1).clamp_(min=1e-3)
+    Z = alpha.float().sum(dim=1).clamp_(min=1)
     scores = scores_sum / Z
     # Every token of a fully masked document sits at the dtype minimum: the sum overflows to -inf
     # when k spans all tokens, and the scatter flattens it to a retrievable-looking 0 below that.
