@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import sys
 import tempfile
 from typing import Literal
 
@@ -748,6 +749,10 @@ def test_xtr_scores_clamps_topk_to_token_pool() -> None:
     assert torch.isfinite(scores).all()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="bfloat16 CPU matmul can hard-crash (0xc000001d) on some Windows machines. Skipping to avoid CI failures.",
+)
 def test_colbert_scores_keep_float32_through_delegation() -> None:
     """The losses' default similarity_fct surface must keep maxsim's float32 scores, also under a
     future fused reimplementation. Also pins the KD block-diagonal relation to the full matrix."""
@@ -766,6 +771,10 @@ def test_colbert_scores_keep_float32_through_delegation() -> None:
     assert torch.allclose(kd_scores[1], scores[1, 3:6])
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="bfloat16 CPU matmul can hard-crash (0xc000001d) on some Windows machines. Skipping to avoid CI failures.",
+)
 def test_xtr_scores_half_precision_accumulates_in_float32() -> None:
     """XTR's own query-token sum accumulates in float32: an output cast alone cannot restore the
     resolution a bf16 sum loses."""
