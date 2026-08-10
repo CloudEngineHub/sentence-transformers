@@ -70,7 +70,7 @@ def cos_sim(a: list | np.ndarray | Tensor, b: list | np.ndarray | Tensor) -> Ten
     return torch.mm(a_norm, b_norm.transpose(0, 1)).to_dense()
 
 
-def pairwise_cos_sim(a: Tensor, b: Tensor) -> Tensor:
+def pairwise_cos_sim(a: list | np.ndarray | Tensor, b: list | np.ndarray | Tensor) -> Tensor:
     """
     Computes the pairwise cosine similarity cos_sim(a[i], b[i]).
 
@@ -110,7 +110,7 @@ def dot_score(a: list | np.ndarray | Tensor, b: list | np.ndarray | Tensor) -> T
     return torch.mm(a, b.transpose(0, 1)).to_dense()
 
 
-def pairwise_dot_score(a: Tensor, b: Tensor) -> Tensor:
+def pairwise_dot_score(a: list | np.ndarray | Tensor, b: list | np.ndarray | Tensor) -> Tensor:
     """
     Computes the pairwise dot-product dot_prod(a[i], b[i]).
 
@@ -698,7 +698,7 @@ class SimilarityFunction(Enum):
     @staticmethod
     def to_similarity_fn(
         similarity_function: str | SimilarityFunction,
-    ) -> Callable[[Tensor | ndarray, Tensor | ndarray], Tensor]:
+    ) -> Callable[[list | ndarray | Tensor, list | ndarray | Tensor], Tensor]:
         """
         Converts a similarity function name or enum value to the corresponding similarity function.
 
@@ -706,7 +706,7 @@ class SimilarityFunction(Enum):
             similarity_function (Union[str, SimilarityFunction]): The name or enum value of the similarity function.
 
         Returns:
-            Callable[[Union[Tensor, ndarray], Union[Tensor, ndarray]], Tensor]: The corresponding similarity function.
+            Callable[[Union[list, ndarray, Tensor], Union[list, ndarray, Tensor]], Tensor]: The corresponding similarity function.
 
         Raises:
             ValueError: If the provided function is not supported.
@@ -738,7 +738,7 @@ class SimilarityFunction(Enum):
     @staticmethod
     def to_similarity_pairwise_fn(
         similarity_function: str | SimilarityFunction,
-    ) -> Callable[[Tensor | ndarray, Tensor | ndarray], Tensor]:
+    ) -> Callable[[list | ndarray | Tensor, list | ndarray | Tensor], Tensor]:
         """
         Converts a similarity function into a pairwise similarity function.
 
@@ -750,7 +750,7 @@ class SimilarityFunction(Enum):
             similarity_function (Union[str, SimilarityFunction]): The name or enum value of the similarity function.
 
         Returns:
-            Callable[[Union[Tensor, ndarray], Union[Tensor, ndarray]], Tensor]: The pairwise similarity function.
+            Callable[[Union[list, ndarray, Tensor], Union[list, ndarray, Tensor]], Tensor]: The pairwise similarity function.
 
         Raises:
             ValueError: If the provided similarity function is not supported.

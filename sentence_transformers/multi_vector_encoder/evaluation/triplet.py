@@ -8,6 +8,8 @@ from sentence_transformers.sentence_transformer.evaluation.triplet import Triple
 from sentence_transformers.util.similarity import SimilarityFunction
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     import numpy as np
 
     from sentence_transformers.base.modality_types import SingleInput
@@ -72,7 +74,7 @@ class MultiVectorTripletEvaluator(TripletEvaluator):
     def embed_inputs(
         self,
         model: MultiVectorEncoder,
-        sentences: SingleInput | list[SingleInput] | np.ndarray,
+        sentences: SingleInput | Sequence[SingleInput] | np.ndarray,
         encode_fn_name: str | None = None,
         **kwargs,
     ) -> list[Tensor]:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import logging
 import os
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Literal
 
 from sentence_transformers.base.evaluation.evaluator import BaseEvaluator
@@ -91,9 +92,9 @@ class TripletEvaluator(BaseEvaluator):
 
     def __init__(
         self,
-        anchors: list[SingleInput],
-        positives: list[SingleInput],
-        negatives: list[SingleInput],
+        anchors: Sequence[SingleInput],
+        positives: Sequence[SingleInput],
+        negatives: Sequence[SingleInput],
         main_similarity_function: str | SimilarityFunction | None = None,
         margin: float | dict[str, float] | None = None,
         name: str = "",
@@ -234,7 +235,7 @@ class TripletEvaluator(BaseEvaluator):
     def embed_inputs(
         self,
         model: SentenceTransformer,
-        sentences: SingleInput | list[SingleInput] | np.ndarray,
+        sentences: SingleInput | Sequence[SingleInput] | np.ndarray,
         encode_fn_name: str | None = None,
         **kwargs,
     ) -> np.ndarray:

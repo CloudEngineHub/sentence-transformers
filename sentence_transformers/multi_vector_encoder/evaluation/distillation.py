@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import logging
 import os
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -96,8 +97,8 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
 
     def __init__(
         self,
-        queries: list[SingleInput],
-        documents: list[SingleInput] | list[list[SingleInput]],
+        queries: Sequence[SingleInput],
+        documents: Sequence[SingleInput] | Sequence[Sequence[SingleInput]],
         scores: list[float] | list[list[float]] | torch.Tensor,
         normalize_scores: bool = True,
         temperature: float = 1.0,
@@ -114,6 +115,8 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
             )
         self.queries = list(queries)
         self.nested_documents = bool(documents) and isinstance(documents[0], (list, tuple))
+        # Flat per-query documents, or per-query candidate lists when nested_documents is set.
+        self.documents: list[Any]
         if self.nested_documents:
             n_ways = len(documents[0])
             if any(len(row) != n_ways for row in documents):

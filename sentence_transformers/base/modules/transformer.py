@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import importlib
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from dataclasses import fields
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, get_args, get_type_hints
 
 import torch
 from packaging.version import parse as parse_version
-from tokenizers.normalizers import Lowercase, Sequence
+from tokenizers.normalizers import Lowercase
+from tokenizers.normalizers import Sequence as NormalizerSequence
 from transformers import (
     AutoConfig,
     AutoModel,
@@ -477,7 +478,7 @@ def _has_lowercase(normalizer) -> bool:
         return False
     if isinstance(normalizer, Lowercase):
         return True
-    if isinstance(normalizer, Sequence):
+    if isinstance(normalizer, NormalizerSequence):
         return any(isinstance(n, Lowercase) for n in normalizer)
     return False
 
@@ -888,11 +889,11 @@ class Transformer(InputModule):
                     normalizer = self.tokenizer.backend_tokenizer.normalizer
                     if not _has_lowercase(normalizer):
                         new_normalizers = [Lowercase()]
-                        if isinstance(normalizer, Sequence):
+                        if isinstance(normalizer, NormalizerSequence):
                             new_normalizers += list(normalizer)
                         elif normalizer is not None:
                             new_normalizers.append(normalizer)
-                        self.tokenizer.backend_tokenizer.normalizer = Sequence(new_normalizers)
+                        self.tokenizer.backend_tokenizer.normalizer = NormalizerSequence(new_normalizers)
                 else:
                     # Some v4 Tokenizers have do_lower_case as property without a setter, and those often
                     # have a basic_tokenizer on which do_lower_case can be set.
@@ -1227,7 +1228,7 @@ class Transformer(InputModule):
 
     def preprocess(
         self,
-        inputs: list[SingleInput | PairInput],
+        inputs: Sequence[SingleInput | PairInput],
         prompt: str | None = None,
         processing_kwargs: ProcessingKwargs | None = None,
         **kwargs,

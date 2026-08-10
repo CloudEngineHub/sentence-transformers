@@ -995,6 +995,24 @@ def test_is_singular_input_tuple(stsb_bert_tiny_model: SentenceTransformer) -> N
     assert stsb_bert_tiny_model.is_singular_input(("hello", "world")) is False
 
 
+def test_is_singular_input_conversation(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    """A bare conversation (list of role/content message dicts) is one input, not a batch."""
+    conversation = [
+        {"role": "user", "content": "What is the capital of France?"},
+        {"role": "assistant", "content": "Paris."},
+    ]
+    assert stsb_bert_tiny_model.is_singular_input(conversation) is True
+    assert stsb_bert_tiny_model.is_singular_input([{"role": "user", "content": "hi"}]) is True
+
+
+def test_is_singular_input_conversation_batch(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    """A list of conversations is a batch, and non-message dicts do not trigger the conversation rule."""
+    conversations = [[{"role": "user", "content": "hi"}], [{"role": "user", "content": "hello"}]]
+    assert stsb_bert_tiny_model.is_singular_input(conversations) is False
+    multimodal_batch = [{"text": "a photo"}, {"text": "a dog"}]
+    assert stsb_bert_tiny_model.is_singular_input(multimodal_batch) is False
+
+
 def test_is_singular_input_numpy(stsb_bert_tiny_model: SentenceTransformer) -> None:
     """A numeric numpy array should be singular (treated as an audio waveform)."""
     assert stsb_bert_tiny_model.is_singular_input(np.array([1, 2, 3])) is True

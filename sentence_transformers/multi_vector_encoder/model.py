@@ -17,6 +17,7 @@ from torch import Tensor, nn
 from tqdm import trange
 from transformers import AddedToken
 from transformers.utils import logging as transformers_logging
+from typing_extensions import TypeIs
 
 from sentence_transformers.base import BaseModel
 from sentence_transformers.base.modality_types import SingleInput
@@ -202,9 +203,257 @@ class MultiVectorEncoder(BaseModel):
                     "the Transformer."
                 )
 
+    def is_singular_input(self, inputs: Any) -> TypeIs[SingleInput]:
+        """Check if the input is a single example rather than a batch. Redeclared with
+        :class:`~typing_extensions.TypeIs` so type checkers narrow the branches in :meth:`encode`."""
+        return super().is_singular_input(inputs)
+
+    # Ordered overloads: the first match wins, so the all-defaults signatures come first and each
+    # deviation pins its deviating flag as a required keyword. Singular inputs precede Sequence ones
+    # so plain strings and bare conversations resolve as one input (both also match Sequence).
+    @overload
     def encode_query(
         self,
-        inputs: list[SingleInput] | SingleInput,
+        inputs: SingleInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: Literal[False] = ...,
+        convert_to_numpy: Literal[True] = ...,
+        convert_to_padded_tensor: Literal[False] = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> np.ndarray: ...
+
+    @overload
+    def encode_query(
+        self,
+        inputs: SingleInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: Literal[True],
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: bool = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> Tensor: ...
+
+    @overload
+    def encode_query(
+        self,
+        inputs: SingleInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: Literal[False],
+        convert_to_padded_tensor: bool = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> Tensor: ...
+
+    @overload
+    def encode_query(
+        self,
+        inputs: SingleInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: Literal[True],
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> Tensor: ...
+
+    @overload
+    def encode_query(
+        self,
+        inputs: SingleInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: None,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: bool = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> dict[str, Tensor]: ...
+
+    @overload
+    def encode_query(
+        self,
+        inputs: Sequence[SingleInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: Literal[False] = ...,
+        convert_to_numpy: Literal[True] = ...,
+        convert_to_padded_tensor: Literal[False] = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> list[np.ndarray]: ...
+
+    @overload
+    def encode_query(
+        self,
+        inputs: Sequence[SingleInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: Literal[True],
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: Literal[False] = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> list[Tensor]: ...
+
+    @overload
+    def encode_query(
+        self,
+        inputs: Sequence[SingleInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: Literal[False],
+        convert_to_padded_tensor: Literal[False] = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> list[Tensor]: ...
+
+    @overload
+    def encode_query(
+        self,
+        inputs: Sequence[SingleInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: Literal[True],
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> Tensor: ...
+
+    @overload
+    def encode_query(
+        self,
+        inputs: Sequence[SingleInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: None,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: bool = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> list[dict[str, Tensor]]: ...
+
+    # Catch-all so forwarding calls with union-typed arguments (e.g. from evaluators) still resolve.
+    @overload
+    def encode_query(
+        self,
+        inputs: Sequence[SingleInput] | SingleInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        output_value: Literal["token_embeddings"] | None = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: bool = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> list[Tensor] | list[np.ndarray] | Tensor | np.ndarray | list[dict[str, Tensor]] | dict[str, Tensor]: ...
+
+    def encode_query(
+        self,
+        inputs: Sequence[SingleInput] | SingleInput,
         prompt_name: str | None = None,
         prompt: str | None = None,
         batch_size: int = 32,
@@ -253,9 +502,249 @@ class MultiVectorEncoder(BaseModel):
             **kwargs,
         )
 
+    @overload
     def encode_document(
         self,
-        inputs: list[SingleInput] | SingleInput,
+        inputs: SingleInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: Literal[False] = ...,
+        convert_to_numpy: Literal[True] = ...,
+        convert_to_padded_tensor: Literal[False] = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> np.ndarray: ...
+
+    @overload
+    def encode_document(
+        self,
+        inputs: SingleInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: Literal[True],
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: bool = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> Tensor: ...
+
+    @overload
+    def encode_document(
+        self,
+        inputs: SingleInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: Literal[False],
+        convert_to_padded_tensor: bool = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> Tensor: ...
+
+    @overload
+    def encode_document(
+        self,
+        inputs: SingleInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: Literal[True],
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> Tensor: ...
+
+    @overload
+    def encode_document(
+        self,
+        inputs: SingleInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: None,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: bool = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> dict[str, Tensor]: ...
+
+    @overload
+    def encode_document(
+        self,
+        inputs: Sequence[SingleInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: Literal[False] = ...,
+        convert_to_numpy: Literal[True] = ...,
+        convert_to_padded_tensor: Literal[False] = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> list[np.ndarray]: ...
+
+    @overload
+    def encode_document(
+        self,
+        inputs: Sequence[SingleInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: Literal[True],
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: Literal[False] = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> list[Tensor]: ...
+
+    @overload
+    def encode_document(
+        self,
+        inputs: Sequence[SingleInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: Literal[False],
+        convert_to_padded_tensor: Literal[False] = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> list[Tensor]: ...
+
+    @overload
+    def encode_document(
+        self,
+        inputs: Sequence[SingleInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: Literal[True],
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> Tensor: ...
+
+    @overload
+    def encode_document(
+        self,
+        inputs: Sequence[SingleInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: None,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: bool = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> list[dict[str, Tensor]]: ...
+
+    # Catch-all so forwarding calls with union-typed arguments (e.g. from evaluators) still resolve.
+    @overload
+    def encode_document(
+        self,
+        inputs: Sequence[SingleInput] | SingleInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        output_value: Literal["token_embeddings"] | None = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: bool = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        **kwargs: Any,
+    ) -> list[Tensor] | list[np.ndarray] | Tensor | np.ndarray | list[dict[str, Tensor]] | dict[str, Tensor]: ...
+
+    def encode_document(
+        self,
+        inputs: Sequence[SingleInput] | SingleInput,
         prompt_name: str | None = None,
         prompt: str | None = None,
         batch_size: int = 32,
@@ -308,10 +797,261 @@ class MultiVectorEncoder(BaseModel):
             **kwargs,
         )
 
+    @overload
+    def encode(
+        self,
+        inputs: SingleInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: Literal[False] = ...,
+        convert_to_numpy: Literal[True] = ...,
+        convert_to_padded_tensor: Literal[False] = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        task: str | None = ...,
+        **kwargs: Any,
+    ) -> np.ndarray: ...
+
+    @overload
+    def encode(
+        self,
+        inputs: SingleInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: Literal[True],
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: bool = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        task: str | None = ...,
+        **kwargs: Any,
+    ) -> Tensor: ...
+
+    @overload
+    def encode(
+        self,
+        inputs: SingleInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: Literal[False],
+        convert_to_padded_tensor: bool = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        task: str | None = ...,
+        **kwargs: Any,
+    ) -> Tensor: ...
+
+    @overload
+    def encode(
+        self,
+        inputs: SingleInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: Literal[True],
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        task: str | None = ...,
+        **kwargs: Any,
+    ) -> Tensor: ...
+
+    @overload
+    def encode(
+        self,
+        inputs: SingleInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: None,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: bool = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        task: str | None = ...,
+        **kwargs: Any,
+    ) -> dict[str, Tensor]: ...
+
+    @overload
+    def encode(
+        self,
+        inputs: Sequence[SingleInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: Literal[False] = ...,
+        convert_to_numpy: Literal[True] = ...,
+        convert_to_padded_tensor: Literal[False] = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        task: str | None = ...,
+        **kwargs: Any,
+    ) -> list[np.ndarray]: ...
+
+    @overload
+    def encode(
+        self,
+        inputs: Sequence[SingleInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: Literal[True],
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: Literal[False] = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        task: str | None = ...,
+        **kwargs: Any,
+    ) -> list[Tensor]: ...
+
+    @overload
+    def encode(
+        self,
+        inputs: Sequence[SingleInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: Literal[False],
+        convert_to_padded_tensor: Literal[False] = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        task: str | None = ...,
+        **kwargs: Any,
+    ) -> list[Tensor]: ...
+
+    @overload
+    def encode(
+        self,
+        inputs: Sequence[SingleInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: Literal["token_embeddings"] = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: Literal[True],
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        task: str | None = ...,
+        **kwargs: Any,
+    ) -> Tensor: ...
+
+    @overload
+    def encode(
+        self,
+        inputs: Sequence[SingleInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        output_value: None,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: bool = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        task: str | None = ...,
+        **kwargs: Any,
+    ) -> list[dict[str, Tensor]]: ...
+
+    # Catch-all so forwarding calls with union-typed arguments (e.g. from encode_query) still resolve.
+    @overload
+    def encode(
+        self,
+        inputs: Sequence[SingleInput] | SingleInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        output_value: Literal["token_embeddings"] | None = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_numpy: bool = ...,
+        convert_to_padded_tensor: bool = ...,
+        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        normalize_embeddings: bool = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        pooling: BaseTokenPooling | None = ...,
+        task: str | None = ...,
+        **kwargs: Any,
+    ) -> list[Tensor] | list[np.ndarray] | Tensor | np.ndarray | list[dict[str, Tensor]] | dict[str, Tensor]: ...
+
     # TODO (v6.0): Consider replacing convert_to_* with return_as / output_format
     def encode(
         self,
-        inputs: list[SingleInput] | SingleInput,
+        inputs: Sequence[SingleInput] | SingleInput,
         prompt_name: str | None = None,
         prompt: str | None = None,
         batch_size: int = 32,
@@ -414,7 +1154,9 @@ class MultiVectorEncoder(BaseModel):
         if is_singular_input:
             inputs = [inputs]
         elif not isinstance(inputs, list):
-            inputs = inputs.tolist() if isinstance(inputs, np.ndarray) else list(inputs)
+            # The annotation pins ndarray.tolist()'s Any so checkers keep the narrowed input type.
+            materialized: list[SingleInput] = inputs.tolist() if isinstance(inputs, np.ndarray) else list(inputs)
+            inputs = materialized
 
         # Validate kwargs (matching SparseEncoder.encode behaviour).
         model_kwargs = self.get_model_kwargs()
@@ -589,14 +1331,13 @@ class MultiVectorEncoder(BaseModel):
             self._similarity = SimilarityFunction.to_similarity_fn(value)
             self._similarity_pairwise = SimilarityFunction.to_similarity_pairwise_fn(value)
 
-    @overload
-    def similarity(self, embeddings1: Tensor, embeddings2: Tensor) -> Tensor: ...
-
-    @overload
-    def similarity(self, embeddings1: list[Tensor], embeddings2: list[Tensor]) -> Tensor: ...
-
     @property
-    def similarity(self) -> Callable[[Tensor | list[Tensor], Tensor | list[Tensor]], Tensor]:
+    def similarity(
+        self,
+    ) -> Callable[
+        [Tensor | np.ndarray | list[Tensor] | list[np.ndarray], Tensor | np.ndarray | list[Tensor] | list[np.ndarray]],
+        Tensor,
+    ]:
         """Compute the all-pairs MaxSim score matrix between two collections of multi-vector embeddings.
 
         Returns a matrix of shape ``(num_embeddings_1, num_embeddings_2)``.
@@ -612,16 +1353,13 @@ class MultiVectorEncoder(BaseModel):
         self.similarity_fn_name  # noqa: B018 (trigger lazy init)
         return self._similarity
 
-    @overload
-    def similarity_pairwise(self, embeddings1: Tensor, embeddings2: Tensor) -> Tensor: ...
-
-    @overload
-    def similarity_pairwise(self, embeddings1: list[Tensor], embeddings2: list[Tensor]) -> Tensor: ...
-
     @property
     def similarity_pairwise(
         self,
-    ) -> Callable[[Tensor | list[Tensor], Tensor | list[Tensor]], Tensor]:
+    ) -> Callable[
+        [Tensor | np.ndarray | list[Tensor] | list[np.ndarray], Tensor | np.ndarray | list[Tensor] | list[np.ndarray]],
+        Tensor,
+    ]:
         """Compute the pairwise MaxSim score vector between matched query / document pairs."""
         self.similarity_fn_name  # noqa: B018 (trigger lazy init)
         return self._similarity_pairwise
@@ -1155,7 +1893,7 @@ class MultiVectorEncoder(BaseModel):
 
     def _multi_process(
         self,
-        inputs: list[SingleInput],
+        inputs: Sequence[SingleInput],
         show_progress_bar: bool | None = True,
         pool: dict[Literal["input", "output", "processes"], Any] | None = None,
         device: str | torch.device | list[str | torch.device] | None = None,

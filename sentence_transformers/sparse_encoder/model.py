@@ -10,7 +10,6 @@ from multiprocessing import Queue
 from typing import Any, ClassVar, Literal, overload
 
 import numpy as np
-import numpy.typing as npt
 import torch
 from torch import Tensor, nn
 from tqdm import trange
@@ -203,6 +202,82 @@ class SparseEncoder(BaseModel):
                     self.max_active_dims = module.k
                     break
 
+    # Ordered overloads: the first match wins, so the all-defaults signatures come first and the
+    # convert_to_tensor=False deviation pins its flag as a required keyword.
+    @overload
+    def encode_query(
+        self,
+        inputs: TextInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_sparse_tensor: bool = ...,
+        save_to_cpu: bool = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        max_active_dims: int | None = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        **kwargs: Any,
+    ) -> Tensor: ...
+
+    @overload
+    def encode_query(
+        self,
+        inputs: list[TextInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        convert_to_tensor: Literal[True] = ...,
+        convert_to_sparse_tensor: bool = ...,
+        save_to_cpu: bool = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        max_active_dims: int | None = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        **kwargs: Any,
+    ) -> Tensor: ...
+
+    @overload
+    def encode_query(
+        self,
+        inputs: list[TextInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        convert_to_tensor: Literal[False],
+        convert_to_sparse_tensor: bool = ...,
+        save_to_cpu: bool = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        max_active_dims: int | None = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        **kwargs: Any,
+    ) -> list[Tensor]: ...
+
+    # Catch-all so forwarding calls with union-typed arguments (e.g. from evaluators) still resolve.
+    @overload
+    def encode_query(
+        self,
+        inputs: list[TextInput] | TextInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_sparse_tensor: bool = ...,
+        save_to_cpu: bool = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        max_active_dims: int | None = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        **kwargs: Any,
+    ) -> list[Tensor] | Tensor: ...
+
     @deprecated_kwargs(sentences="inputs")
     def encode_query(
         self,
@@ -275,6 +350,80 @@ class SparseEncoder(BaseModel):
             task="query",
             **kwargs,
         )
+
+    @overload
+    def encode_document(
+        self,
+        inputs: TextInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_sparse_tensor: bool = ...,
+        save_to_cpu: bool = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        max_active_dims: int | None = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        **kwargs: Any,
+    ) -> Tensor: ...
+
+    @overload
+    def encode_document(
+        self,
+        inputs: list[TextInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        convert_to_tensor: Literal[True] = ...,
+        convert_to_sparse_tensor: bool = ...,
+        save_to_cpu: bool = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        max_active_dims: int | None = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        **kwargs: Any,
+    ) -> Tensor: ...
+
+    @overload
+    def encode_document(
+        self,
+        inputs: list[TextInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        convert_to_tensor: Literal[False],
+        convert_to_sparse_tensor: bool = ...,
+        save_to_cpu: bool = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        max_active_dims: int | None = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        **kwargs: Any,
+    ) -> list[Tensor]: ...
+
+    # Catch-all so forwarding calls with union-typed arguments (e.g. from evaluators) still resolve.
+    @overload
+    def encode_document(
+        self,
+        inputs: list[TextInput] | TextInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_sparse_tensor: bool = ...,
+        save_to_cpu: bool = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        max_active_dims: int | None = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        **kwargs: Any,
+    ) -> list[Tensor] | Tensor: ...
 
     @deprecated_kwargs(sentences="inputs")
     def encode_document(
@@ -351,6 +500,80 @@ class SparseEncoder(BaseModel):
             task="document",
             **kwargs,
         )
+
+    @overload
+    def encode(
+        self,
+        inputs: TextInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_sparse_tensor: bool = ...,
+        save_to_cpu: bool = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        max_active_dims: int | None = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        **kwargs: Any,
+    ) -> Tensor: ...
+
+    @overload
+    def encode(
+        self,
+        inputs: list[TextInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        convert_to_tensor: Literal[True] = ...,
+        convert_to_sparse_tensor: bool = ...,
+        save_to_cpu: bool = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        max_active_dims: int | None = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        **kwargs: Any,
+    ) -> Tensor: ...
+
+    @overload
+    def encode(
+        self,
+        inputs: list[TextInput],
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        *,
+        convert_to_tensor: Literal[False],
+        convert_to_sparse_tensor: bool = ...,
+        save_to_cpu: bool = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        max_active_dims: int | None = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        **kwargs: Any,
+    ) -> list[Tensor]: ...
+
+    # Catch-all so forwarding calls with union-typed arguments (e.g. from encode_query) still resolve.
+    @overload
+    def encode(
+        self,
+        inputs: list[TextInput] | TextInput,
+        prompt_name: str | None = ...,
+        prompt: str | None = ...,
+        batch_size: int = ...,
+        show_progress_bar: bool | None = ...,
+        convert_to_tensor: bool = ...,
+        convert_to_sparse_tensor: bool = ...,
+        save_to_cpu: bool = ...,
+        device: str | torch.device | list[str | torch.device] | None = ...,
+        max_active_dims: int | None = ...,
+        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
+        chunk_size: int | None = ...,
+        **kwargs: Any,
+    ) -> list[Tensor] | Tensor: ...
 
     @deprecated_kwargs(sentences="inputs")
     def encode(
@@ -628,14 +851,13 @@ class SparseEncoder(BaseModel):
                 module.include_prompt = include_prompt
                 break
 
-    @overload
-    def similarity(self, embeddings1: Tensor, embeddings2: Tensor) -> Tensor: ...
-
-    @overload
-    def similarity(self, embeddings1: npt.NDArray[np.float32], embeddings2: npt.NDArray[np.float32]) -> Tensor: ...
-
     @property
-    def similarity(self) -> Callable[[Tensor | npt.NDArray[np.float32], Tensor | npt.NDArray[np.float32]], Tensor]:
+    def similarity(
+        self,
+    ) -> Callable[
+        [Tensor | np.ndarray | list[Tensor] | list[np.ndarray], Tensor | np.ndarray | list[Tensor] | list[np.ndarray]],
+        Tensor,
+    ]:
         """
         Compute the similarity between two collections of embeddings. The output will be a matrix with the similarity
         scores between all embeddings from the first parameter and all embeddings from the second parameter. This
@@ -678,18 +900,13 @@ class SparseEncoder(BaseModel):
         self.similarity_fn_name  # noqa: B018
         return self._similarity
 
-    @overload
-    def similarity_pairwise(self, embeddings1: Tensor, embeddings2: Tensor) -> Tensor: ...
-
-    @overload
-    def similarity_pairwise(
-        self, embeddings1: npt.NDArray[np.float32], embeddings2: npt.NDArray[np.float32]
-    ) -> Tensor: ...
-
     @property
     def similarity_pairwise(
         self,
-    ) -> Callable[[Tensor | npt.NDArray[np.float32], Tensor | npt.NDArray[np.float32]], Tensor]:
+    ) -> Callable[
+        [Tensor | np.ndarray | list[Tensor] | list[np.ndarray], Tensor | np.ndarray | list[Tensor] | list[np.ndarray]],
+        Tensor,
+    ]:
         """
         Compute the similarity between two collections of embeddings. The output will be a vector with the similarity
         scores between each pair of embeddings.

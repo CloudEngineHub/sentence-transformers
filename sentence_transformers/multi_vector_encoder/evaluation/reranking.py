@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from sentence_transformers.sentence_transformer.evaluation.reranking import RerankingEvaluator
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from torch import Tensor
 
@@ -97,7 +97,7 @@ class MultiVectorRerankingEvaluator(RerankingEvaluator):
     def embed_inputs(
         self,
         model: MultiVectorEncoder,
-        sentences: SingleInput | list[SingleInput],
+        sentences: SingleInput | Sequence[SingleInput],
         encode_fn_name: str | None = None,
         show_progress_bar: bool | None = None,
         **kwargs,

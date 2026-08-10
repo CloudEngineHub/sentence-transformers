@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -190,7 +190,7 @@ class MultiVectorInformationRetrievalEvaluator(InformationRetrievalEvaluator):
     def embed_inputs(
         self,
         model: MultiVectorEncoder,
-        sentences: SingleInput | list[SingleInput] | np.ndarray,
+        sentences: SingleInput | Sequence[SingleInput] | np.ndarray,
         encode_fn_name: str | None = None,
         prompt_name: str | None = None,
         prompt: str | None = None,

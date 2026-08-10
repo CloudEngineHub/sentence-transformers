@@ -10,6 +10,7 @@ import tempfile
 import traceback
 from abc import ABC, abstractmethod
 from collections import OrderedDict
+from collections.abc import Sequence
 from multiprocessing import Queue
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -27,7 +28,7 @@ from transformers.utils import logging as transformers_logging
 
 from sentence_transformers import __version__
 from sentence_transformers.base.evaluation import BaseEvaluator
-from sentence_transformers.base.modality import infer_batch_modality, raise_unsupported_modality_error
+from sentence_transformers.base.modality import infer_batch_modality, is_message_dict, raise_unsupported_modality_error
 from sentence_transformers.base.modality_types import Modality, PairInput, SingleInput
 from sentence_transformers.base.model_card import BaseModelCardData, generate_model_card
 from sentence_transformers.base.modules import Module, Router, Transformer
@@ -468,7 +469,7 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
 
         # Text pair or non-text pair
         if isinstance(sample, (tuple, list)):
-            if sample and not (isinstance(sample[0], dict) and "role" in sample[0]):
+            if sample and not is_message_dict(sample[0]):
                 return sum(BaseModel._input_length(s) for s in sample)
 
         # Dict inputs: audio/video wrappers, messages, multimodal dicts
@@ -539,7 +540,7 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
 
     def preprocess(
         self,
-        inputs: list[SingleInput | PairInput],
+        inputs: Sequence[SingleInput | PairInput],
         prompt: str | None = None,
         **kwargs,
     ) -> dict[str, Tensor | Any]:
@@ -547,7 +548,7 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
         Preprocesses the inputs for the model.
 
         Args:
-            inputs (list[SingleInput | PairInput]): A list of inputs to be preprocessed. Each input can be a
+            inputs (Sequence[SingleInput | PairInput]): A list of inputs to be preprocessed. Each input can be a
                 string, dict, tuple, PIL Image, numpy array, torch Tensor, or other supported modality.
                 If a single input is provided, it must be wrapped in a list.
             prompt (str, optional): A prompt string to prepend to text inputs. Defaults to None.
@@ -608,11 +609,17 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
         """
         Check if the input represents a single example or a batch of examples.
 
+        A list is the batch axis, with one exception: a conversation (a list of role/content
+        message dicts) is a single example, matching how chat templates read a message list.
+        A batch of single messages can be passed as one-turn conversations, e.g. ``[[msg]]``.
+
         Args:
             inputs: The input to check.
         Returns:
             bool: True if the input is a single example, False if it is a batch.
         """
+        if isinstance(inputs, list) and inputs and is_message_dict(inputs[0]):
+            return True
         list_types = (list, tuple)
         if is_datasets_available():
             try:

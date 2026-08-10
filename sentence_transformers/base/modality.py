@@ -6,15 +6,18 @@ import copy
 import logging
 import os
 from collections import defaultdict
+from collections.abc import Sequence
 from typing import Any, Literal, NoReturn
 from urllib.parse import urlparse
 
 import numpy as np
 import torch
+from typing_extensions import TypeIs
 
 from sentence_transformers.base.modality_types import (
     MULTIMODAL_DICT_KEYS,
     AudioInput,
+    MessageDict,
     MessageFormat,
     Modality,
     PairInput,
@@ -99,6 +102,11 @@ def is_audio_url_or_path(text: str) -> bool:
     return _is_media_url_or_path(text, (".mp3", ".wav", ".ogg", ".flac", ".aac"))
 
 
+def is_message_dict(value: Any) -> TypeIs[MessageDict]:
+    """Check if a value is a single chat message: a dict with ``"role"`` and ``"content"`` keys."""
+    return isinstance(value, dict) and "role" in value and "content" in value
+
+
 def _is_non_text_pair(sample: Any) -> bool:
     """Check if a sample is a non-text pair (2-element tuple/list with at least one non-string element).
 
@@ -111,9 +119,9 @@ def _is_non_text_pair(sample: Any) -> bool:
     # Text pairs are handled by infer_modality as "text"
     if isinstance(sample[0], str) and isinstance(sample[1], str):
         return False
-    # Exclude message dicts (role+content) and list-of-message-dicts
+    # Exclude message dicts and list-of-message-dicts
     for elem in sample:
-        if isinstance(elem, dict) and "role" in elem and "content" in elem:
+        if is_message_dict(elem):
             return False
         if isinstance(elem, list) and elem and isinstance(elem[0], dict):
             return False
@@ -304,7 +312,7 @@ class InputFormatter:
 
     def parse_inputs(
         self,
-        inputs: list[SingleInput | PairInput],
+        inputs: Sequence[SingleInput | PairInput],
     ) -> tuple[Modality, dict[str, list], defaultdict[str, dict[str, Any]]]:
         """Parse inputs and group by modality.
 
@@ -725,9 +733,9 @@ def infer_modality(
             return "audio"
         case str() | (str(), str()) | [str(), str()]:
             return "text"
-        case dict() if "role" in sample and "content" in sample:
+        case dict() if is_message_dict(sample):
             return "message"
-        case list() if sample and isinstance(sample[0], dict) and "role" in sample[0] and "content" in sample[0]:
+        case list() if sample and is_message_dict(sample[0]):
             return "message"
         case dict() if "array" in sample and "sampling_rate" in sample:
             return "audio"
@@ -791,7 +799,7 @@ def infer_modality(
 
 
 def infer_batch_modality(
-    samples: list[SingleInput | PairInput],
+    samples: Sequence[SingleInput | PairInput],
     supported_modalities: list[Modality] | None = None,
 ) -> Modality:
     """Infer the modality of a batch of input samples.
@@ -822,7 +830,7 @@ def format_modality(modality: Modality) -> str:
 
 
 def raise_unsupported_modality_error(
-    inputs: list[SingleInput | PairInput],
+    inputs: Sequence[SingleInput | PairInput],
     modality: Modality,
     supported_modalities: list[Modality],
     source: str,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Sequence
 from pathlib import Path
 
 try:
@@ -577,7 +578,7 @@ class Router(InputModule):
 
     def preprocess(
         self,
-        inputs: list[SingleInput | PairInput],
+        inputs: Sequence[SingleInput | PairInput],
         prompt: str | None = None,
         task: str | None = None,
         modality: Modality | None = None,

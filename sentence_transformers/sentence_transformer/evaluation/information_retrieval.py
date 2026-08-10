@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -451,7 +451,7 @@ class InformationRetrievalEvaluator(BaseEvaluator):
     def embed_inputs(
         self,
         model: SentenceTransformer,
-        sentences: SingleInput | list[SingleInput] | np.ndarray,
+        sentences: SingleInput | Sequence[SingleInput] | np.ndarray,
         encode_fn_name: str | None = None,
         prompt_name: str | None = None,
         prompt: str | None = None,
