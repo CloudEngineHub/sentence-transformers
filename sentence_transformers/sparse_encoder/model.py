@@ -5,7 +5,6 @@ import logging
 import math
 import queue
 from collections import OrderedDict
-from collections.abc import Callable
 from multiprocessing import Queue
 from typing import Any, ClassVar, Literal, overload
 
@@ -102,8 +101,8 @@ class SparseEncoder(BaseModel):
             or ``"openvino"``. Defaults to ``"torch"``.
         similarity_fn_name (str or SimilarityFunction, optional): The name of the similarity function to use.
             Valid options are ``"cosine"``, ``"dot"``, ``"euclidean"``, and ``"manhattan"``. If not set, it is
-            automatically set to ``"cosine"`` when :attr:`similarity` or :attr:`similarity_pairwise` are first
-            accessed. Defaults to None.
+            automatically set to ``"cosine"`` when :meth:`similarity` or :meth:`similarity_pairwise` are first
+            called. Defaults to None.
         max_active_dims (int, optional): The maximum number of active (non-zero) dimensions in the output of the
             model. ``None`` means no limit, which can be slow or memory-intensive if your model wasn't (yet)
             finetuned to high sparsity. Defaults to None.
@@ -851,13 +850,11 @@ class SparseEncoder(BaseModel):
                 module.include_prompt = include_prompt
                 break
 
-    @property
     def similarity(
         self,
-    ) -> Callable[
-        [Tensor | np.ndarray | list[Tensor] | list[np.ndarray], Tensor | np.ndarray | list[Tensor] | list[np.ndarray]],
-        Tensor,
-    ]:
+        embeddings1: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
+        embeddings2: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
+    ) -> Tensor:
         """
         Compute the similarity between two collections of embeddings. The output will be a matrix with the similarity
         scores between all embeddings from the first parameter and all embeddings from the second parameter. This
@@ -898,15 +895,13 @@ class SparseEncoder(BaseModel):
         """
         # Access the property to trigger lazy initialization if needed
         self.similarity_fn_name  # noqa: B018
-        return self._similarity
+        return self._similarity(embeddings1, embeddings2)
 
-    @property
     def similarity_pairwise(
         self,
-    ) -> Callable[
-        [Tensor | np.ndarray | list[Tensor] | list[np.ndarray], Tensor | np.ndarray | list[Tensor] | list[np.ndarray]],
-        Tensor,
-    ]:
+        embeddings1: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
+        embeddings2: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
+    ) -> Tensor:
         """
         Compute the similarity between two collections of embeddings. The output will be a vector with the similarity
         scores between each pair of embeddings.
@@ -940,7 +935,7 @@ class SparseEncoder(BaseModel):
         """
         # Access the property to trigger lazy initialization if needed
         self.similarity_fn_name  # noqa: B018
-        return self._similarity_pairwise
+        return self._similarity_pairwise(embeddings1, embeddings2)
 
     def _multi_process(
         self,

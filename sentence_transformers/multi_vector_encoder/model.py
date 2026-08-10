@@ -6,7 +6,7 @@ import math
 import queue
 import string
 from collections import OrderedDict
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from multiprocessing import Queue
 from typing import Any, ClassVar, Literal, overload
@@ -1331,13 +1331,11 @@ class MultiVectorEncoder(BaseModel):
             self._similarity = SimilarityFunction.to_similarity_fn(value)
             self._similarity_pairwise = SimilarityFunction.to_similarity_pairwise_fn(value)
 
-    @property
     def similarity(
         self,
-    ) -> Callable[
-        [Tensor | np.ndarray | list[Tensor] | list[np.ndarray], Tensor | np.ndarray | list[Tensor] | list[np.ndarray]],
-        Tensor,
-    ]:
+        embeddings1: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
+        embeddings2: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
+    ) -> Tensor:
         """Compute the all-pairs MaxSim score matrix between two collections of multi-vector embeddings.
 
         Returns a matrix of shape ``(num_embeddings_1, num_embeddings_2)``.
@@ -1351,18 +1349,16 @@ class MultiVectorEncoder(BaseModel):
             tensor([[..., ...]])
         """
         self.similarity_fn_name  # noqa: B018 (trigger lazy init)
-        return self._similarity
+        return self._similarity(embeddings1, embeddings2)
 
-    @property
     def similarity_pairwise(
         self,
-    ) -> Callable[
-        [Tensor | np.ndarray | list[Tensor] | list[np.ndarray], Tensor | np.ndarray | list[Tensor] | list[np.ndarray]],
-        Tensor,
-    ]:
+        embeddings1: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
+        embeddings2: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
+    ) -> Tensor:
         """Compute the pairwise MaxSim score vector between matched query / document pairs."""
         self.similarity_fn_name  # noqa: B018 (trigger lazy init)
-        return self._similarity_pairwise
+        return self._similarity_pairwise(embeddings1, embeddings2)
 
     def _get_model_config(self) -> dict[str, Any]:
         config = super()._get_model_config()

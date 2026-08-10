@@ -7,7 +7,7 @@ import math
 import queue
 import warnings
 from collections import OrderedDict
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from multiprocessing import Queue
 from typing import Any, ClassVar, Literal, overload
@@ -108,8 +108,8 @@ class SentenceTransformer(BaseModel, FitMixin):
             or ``"openvino"``. Defaults to ``"torch"``.
         similarity_fn_name (str or SimilarityFunction, optional): The name of the similarity function to use.
             Valid options are ``"cosine"``, ``"dot"``, ``"euclidean"``, and ``"manhattan"``. If not set, it is
-            automatically set to ``"cosine"`` when :attr:`similarity` or :attr:`similarity_pairwise` are first
-            accessed. Defaults to None.
+            automatically set to ``"cosine"`` when :meth:`similarity` or :meth:`similarity_pairwise` are first
+            called. Defaults to None.
         truncate_dim (int, optional): The dimension to truncate sentence embeddings to. ``None`` means no
             truncation. Defaults to None.
 
@@ -1051,35 +1051,32 @@ class SentenceTransformer(BaseModel, FitMixin):
             self._similarity_pairwise = SimilarityFunction.to_similarity_pairwise_fn(value)
         self._similarity_fn_name = value
 
-    @property
     def similarity(
         self,
-    ) -> Callable[
-        [Tensor | np.ndarray | list[Tensor] | list[np.ndarray], Tensor | np.ndarray | list[Tensor] | list[np.ndarray]],
-        Tensor,
-    ]:
+        embeddings1: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
+        embeddings2: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
+    ) -> Tensor:
         """
-        Return a function that computes the similarity between two collections of embeddings. The output will be a
-        matrix with the similarity scores between all embeddings from the first parameter and all embeddings from the
-        second parameter.
+        Compute the similarity between two collections of embeddings. The output is a matrix with the
+        similarity scores between all embeddings from the first parameter and all embeddings from the
+        second parameter, computed with the similarity function set via ``similarity_fn_name``.
         """
         # Access similarity_fn_name to trigger lazy initialization of _similarity
         self.similarity_fn_name  # noqa: B018
-        return self._similarity
+        return self._similarity(embeddings1, embeddings2)
 
-    @property
     def similarity_pairwise(
         self,
-    ) -> Callable[
-        [Tensor | np.ndarray | list[Tensor] | list[np.ndarray], Tensor | np.ndarray | list[Tensor] | list[np.ndarray]],
-        Tensor,
-    ]:
+        embeddings1: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
+        embeddings2: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
+    ) -> Tensor:
         """
-        Return a function that computes the pairwise similarity between two collections of embeddings.
+        Compute the pairwise similarity between two collections of embeddings, i.e. the similarity
+        between ``embeddings1[i]`` and ``embeddings2[i]`` for each ``i``.
         """
         # Access similarity_fn_name to trigger lazy initialization of _similarity_pairwise
         self.similarity_fn_name  # noqa: B018
-        return self._similarity_pairwise
+        return self._similarity_pairwise(embeddings1, embeddings2)
 
     @deprecated(
         "The `encode_multi_process` method has been deprecated, and its functionality has been integrated into `encode`. "
