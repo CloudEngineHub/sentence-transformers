@@ -72,31 +72,64 @@ class _FakeLoss:
 
 @pytest.mark.skipif(not is_datasets_available(), reason="datasets is not installed")
 class TestSetWidgetExamples:
-    def test_skips_dataset_with_custom_transform(self) -> None:
-        # A set_transform dataset (e.g. KD-style lazy ID -> text resolution) reports its pre-transform
-        # columns via .features, so the widget-example column selection must not run the transform with a
-        # reduced column set. set_widget_examples should skip it rather than starving the transform.
+    def test_generates_examples_for_custom_transform_dataset(self) -> None:
+        # select_columns would starve a set_transform dataset (features are pre-transform), so rows
+        # are sampled through the transform: widgets come from the transformed string values only.
         dataset = Dataset.from_dict(
             {
-                "query_id": ["q1", "q2", "q3"],
-                "document_ids": [["d1", "d2"], ["d2", "d1"], ["d1", "d2"]],
-                "scores": [[1.0, 0.5], [0.9, 0.2], [0.7, 0.3]],
+                "query_id": [f"q{i}" for i in range(10)],
+                "document_ids": [[f"d{i}a", f"d{i}b"] for i in range(10)],
+                "scores": [[1.0, 0.5]] * 10,
             }
         )
 
         def transform(batch):
             # Mimics resolve_ids: needs the "scores" column that select_columns would drop.
             return {
-                "query": [f"query {qid}" for qid in batch["query_id"]],
-                "documents": [["doc"] * len(scores) for scores in batch["scores"]],
+                "query": [f"query about topic {qid}" for qid in batch["query_id"]],
+                "document_1": [f"first document for {qid}" for qid in batch["query_id"]],
+                "document_2": [f"second document for {qid}" for qid in batch["query_id"]],
                 "scores": batch["scores"],
             }
 
         dataset.set_transform(transform)
 
         data = _make_model_card_data()
-        data.set_widget_examples(dataset)  # Must not raise KeyError from the starved transform.
+        data.set_widget_examples(dataset)
+        assert data.widget
+        assert data.usage_examples
+        assert all(isinstance(text, str) for text in data.usage_examples)
+        assert not any("d0a" in text for text in data.usage_examples), "raw IDs must not leak into examples"
+
+    def test_widget_examples_skipped_when_transform_fails(self) -> None:
+        # A transform that fails on row access (e.g. a lookup miss) must be skipped, not crash the card.
+        dataset = Dataset.from_dict({"query_id": ["q1", "q2", "q3"]})
+
+        def transform(batch):
+            raise KeyError("lookup miss")
+
+        dataset.set_transform(transform)
+
+        data = _make_model_card_data()
+        data.set_widget_examples(dataset)
         assert data.widget == []
+
+    def test_widget_examples_prefer_shortest_rows(self) -> None:
+        # lengths are measured on the sampled rows, so the picks must be read back from those same
+        # rows: the 3 longest rows must never surface (regression for the index-space mismatch).
+        dataset = Dataset.from_dict(
+            {f"text{column}": [f"{'x' * (20 * i)} row{i} col{column}" for i in range(8)] for column in range(4)}
+        )
+        data = _make_model_card_data()
+        data.set_widget_examples(dataset)
+        assert data.widget
+        widget_texts = [
+            text
+            for entry in data.widget
+            for text in (entry.get("source_sentence", ""), entry.get("text", ""), *entry.get("sentences", []))
+        ]
+        all_texts = " ".join([*data.usage_examples, *widget_texts])
+        assert not any(f"row{i}" in all_texts for i in (5, 6, 7))
 
     def test_generates_examples_for_plain_text_dataset(self) -> None:
         # A plain text dataset (no transform) must still produce widget examples: the skip above is targeted.

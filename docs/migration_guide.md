@@ -6,6 +6,19 @@
 The v6.0 release introduces :class:`~sentence_transformers.MultiVectorEncoder`, a fourth model type for ColBERT-style multi-vector (late interaction) retrieval models. It absorbs the modeling, training, and evaluation of `PyLate <https://github.com/lightonai/pylate>`_ and `colpali-engine <https://github.com/illuin-tech/colpali>`_: see the two dedicated sections below if you are migrating from either library.
 ```
 
+### Breaking changes
+
+v6.0 requires `transformers` v5.x (up from 4.41+), `torch` 2.2+ (up from 1.11+), and `huggingface-hub` v1.x (up from 0.23+): if your environment pins any of these lower, plan those upgrades first. Smaller floors also moved (`numpy` 1.24+, `scikit-learn` 1.1+, and for the `train` extra `datasets` 2.16+ and `accelerate` 1.3+). The minimum Python version stays 3.10.
+
+#### Changed outputs and artifacts
+
+```{eval-rst}
+- :func:`~sentence_transformers.util.quantization.quantize_embeddings` returns a list of per-input matrices when given a list of 2D arrays, where it previously stacked them into one 3D array: update callers that indexed the stacked array.
+- Multi-process ``encode(pool=..., precision="int8")`` (and ``"uint8"``) now quantizes once after merging the worker results, so the calibration ranges match single-process encoding. Quantized indexes built with v5.x multi-process encoding are not bit-compatible: regenerate them. Peak memory is higher because the full ``float32`` matrix is materialized before quantization.
+```
+
+Behavioral changes that need no code updates (loss bug fixes that change training results, seed reproducibility, model card regeneration differences, compatibility of new saves with older library versions) and a handful of niche API changes are covered in the release notes instead.
+
 ### Migrating from PyLate
 
 ```{eval-rst}

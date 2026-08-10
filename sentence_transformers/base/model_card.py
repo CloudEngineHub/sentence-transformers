@@ -528,29 +528,43 @@ class BaseModelCardData(CardData):
                 # We can't set widget examples from an IterableDataset without losing data
                 continue
 
-            if dataset[dataset_name].format["type"] == "custom":
-                # A custom transform is set (e.g. resolve_ids resolving query/document IDs to texts lazily).
-                # dataset.features then describes the pre-transform columns, so the select_columns below would
-                # starve the transform of the columns it needs. Skip widget examples for such datasets.
-                continue
-
             # Sample 1000 examples from the dataset, sort them by length, and pick the shortest examples as the core
             # examples for the widget
-            columns = [
-                column
-                for column, feature in dataset[dataset_name].features.items()
-                if isinstance(feature, dict)
-                or (isinstance(feature, Value) and feature.dtype in {"string", "large_string"})
-            ]
-            str_dataset = dataset[dataset_name].select_columns(columns)
-            dataset_size = len(str_dataset)
-            if dataset_size == 0:
-                continue
+            if dataset[dataset_name].format["type"] == "custom":
+                # A custom transform is set (e.g. resolve_ids). dataset.features describes the
+                # pre-transform columns, so select_columns would starve the transform: sample rows
+                # through the transform and keep their string values instead.
+                full_size = len(dataset[dataset_name])
+                try:
+                    materialized = [
+                        {key: value for key, value in row.items() if isinstance(value, str)}
+                        for row in dataset[dataset_name].select(
+                            random.sample(range(full_size), k=min(num_samples_to_check, full_size))
+                        )
+                    ]
+                except Exception:
+                    # A transform that fails on plain row access cannot produce widget examples.
+                    continue
+                sampled_rows = [row for row in materialized if row]
+                if not sampled_rows:
+                    continue
+            else:
+                columns = [
+                    column
+                    for column, feature in dataset[dataset_name].features.items()
+                    if isinstance(feature, dict)
+                    or (isinstance(feature, Value) and feature.dtype in {"string", "large_string"})
+                ]
+                str_dataset = dataset[dataset_name].select_columns(columns)
+                dataset_size = len(str_dataset)
+                if dataset_size == 0:
+                    continue
+                sampled_rows = str_dataset.select(
+                    random.sample(range(dataset_size), k=min(num_samples_to_check, dataset_size))
+                )
 
             lengths = {}
-            for idx, sample in enumerate(
-                str_dataset.select(random.sample(range(dataset_size), k=min(num_samples_to_check, dataset_size)))
-            ):
+            for idx, sample in enumerate(sampled_rows):
                 lengths[idx] = sum(len(value) for key, value in sample.items() if key != "dataset_name")
 
             indices, _ = zip(*sorted(lengths.items(), key=lambda x: x[1]))
@@ -559,11 +573,11 @@ class BaseModelCardData(CardData):
             # We want 4 texts, so we take texts from the backup indices, short texts first
             for idx in target_indices:
                 # This is anywhere between 1 and n texts
-                sentences = [sentence for key, sentence in str_dataset[idx].items() if key != "dataset_name"]
+                sentences = [sentence for key, sentence in sampled_rows[idx].items() if key != "dataset_name"]
                 while len(sentences) < 4 and backup_indices:
                     backup_idx = backup_indices.pop()
                     backup_sample = [
-                        sentence for key, sentence in str_dataset[backup_idx].items() if key != "dataset_name"
+                        sentence for key, sentence in sampled_rows[backup_idx].items() if key != "dataset_name"
                     ]
                     if len(backup_sample) == 1:
                         # If there is only one text in the backup sample, we take it
