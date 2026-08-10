@@ -335,6 +335,34 @@ def test_mask_keep_only_token_ids_none_is_noop(model: MultiVectorEncoder) -> Non
     assert mask_module.keep_only_token_ids is None
 
 
+def test_mask_skiplist_tasks_gate(model: MultiVectorEncoder) -> None:
+    """``skiplist_tasks`` is an allowlist (default documents only, no task counts as document):
+    a custom task is no longer skiplisted unless listed, and listing "query" unlocks the
+    query-side skiplist some ColBERT variants use."""
+    mask = MultiVectorMask(skiplist_words=["."])
+    mask.resolve_with_tokenizer(model.tokenizer)
+    period_id = model.tokenizer.convert_tokens_to_ids(".")
+    features = {
+        "input_ids": torch.tensor([[101, period_id, 102]]),
+        "attention_mask": torch.ones(1, 3, dtype=torch.long),
+    }
+    assert mask.forward(dict(features), task="document")["attention_mask"].tolist() == [[True, False, True]]
+    assert mask.forward(dict(features))["attention_mask"].tolist() == [[True, False, True]]
+    assert mask.forward(dict(features), task="query")["attention_mask"].tolist() == [[True, True, True]]
+    assert mask.forward(dict(features), task="image")["attention_mask"].tolist() == [[True, True, True]]
+
+    query_side = MultiVectorMask(skiplist_words=["."], skiplist_tasks=["query", "document"])
+    query_side.resolve_with_tokenizer(model.tokenizer)
+    assert query_side.forward(dict(features), task="query")["attention_mask"].tolist() == [[True, False, True]]
+
+
+def test_mask_skiplist_tasks_round_trips_through_config(tmp_path) -> None:
+    # A bare string coerces to a one-element list, and the key persists.
+    MultiVectorMask(skiplist_words=["."], skiplist_tasks="query").save(str(tmp_path))
+    restored = MultiVectorMask.load(str(tmp_path))
+    assert restored.skiplist_tasks == ["query"]
+
+
 def test_mask_skiplist_drops_unk_resolving_words(model: MultiVectorEncoder, caplog) -> None:
     """``resolve_with_tokenizer`` drops skiplist words that ``convert_tokens_to_ids`` resolves to
     ``unk_token_id``. Otherwise every real ``[UNK]`` document token would be silently excluded from
@@ -1089,7 +1117,7 @@ def test_hierarchical_pooling_module_in_pipeline() -> None:
 
 
 def test_encode_pooling_compounds_and_notes_when_module_present(caplog) -> None:
-    """When a pooling is already in the pipeline AND encode() is called with a per-call ``pooling=``,
+    """When a pooling is already in the pipeline AND encode() is called with a per-call ``token_pooling=``,
     the per-call pooling compounds on top (a supported way to pool further than the built-in default),
     and a one-time note is logged for discoverability."""
     base = "sentence-transformers-testing/stsb-bert-tiny-safetensors"
@@ -1100,7 +1128,7 @@ def test_encode_pooling_compounds_and_notes_when_module_present(caplog) -> None:
     module_only = pooled_model.encode_document([text])
 
     with caplog.at_level("WARNING"):
-        module_plus_kwarg = pooled_model.encode_document([text], pooling=HierarchicalTokenPooling(pool_factor=2))
+        module_plus_kwarg = pooled_model.encode_document([text], token_pooling=HierarchicalTokenPooling(pool_factor=2))
 
     # Compounded: strictly fewer tokens than module-only (the per-call pool runs on top).
     assert module_plus_kwarg[0].shape[0] < module_only[0].shape[0]
@@ -1114,11 +1142,11 @@ def test_encode_pooling_note_skipped_for_unpooled_tasks(caplog) -> None:
     pooled_model.append(HierarchicalTokenPooling(pool_factor=2))
 
     with caplog.at_level("WARNING"):
-        pooled_model.encode_query("a fairly long query", pooling=HierarchicalTokenPooling(pool_factor=2))
+        pooled_model.encode_query("a fairly long query", token_pooling=HierarchicalTokenPooling(pool_factor=2))
     assert not any("compounding" in record.message for record in caplog.records)
 
     with caplog.at_level("WARNING"):
-        pooled_model.encode_document(["a fairly long document"], pooling=HierarchicalTokenPooling(pool_factor=2))
+        pooled_model.encode_document(["a fairly long document"], token_pooling=HierarchicalTokenPooling(pool_factor=2))
     assert any("compounding" in record.message for record in caplog.records)
 
 
@@ -1133,8 +1161,8 @@ def test_encode_pooling_applies_to_raw_output(model: MultiVectorEncoder) -> None
         "medium length document with several tokens",
     ]
     pooling = HierarchicalTokenPooling(pool_factor=2)
-    normal = model.encode_document(texts, pooling=pooling, convert_to_tensor=True)
-    raw = model.encode_document(texts, output_value=None, pooling=pooling)
+    normal = model.encode_document(texts, token_pooling=pooling, convert_to_tensor=True)
+    raw = model.encode_document(texts, output_value=None, token_pooling=pooling)
     assert isinstance(raw, list)
     # The ragged batch must actually contain padded rows for this test to mean anything.
     assert any(not item["attention_mask"].bool().all() for item in raw)
@@ -1148,9 +1176,9 @@ def test_encode_pooling_skips_queries_on_raw_output(model: MultiVectorEncoder) -
     # "query" pools them.
     query = "a fairly long query with plenty of distinct tokens to cluster together here"
     unpooled = model.encode_query(query, output_value=None)["token_embeddings"]
-    skipped = model.encode_query(query, output_value=None, pooling=HierarchicalTokenPooling(pool_factor=2))
+    skipped = model.encode_query(query, output_value=None, token_pooling=HierarchicalTokenPooling(pool_factor=2))
     opted_in = model.encode_query(
-        query, output_value=None, pooling=HierarchicalTokenPooling(pool_factor=2, tasks=["query", "document"])
+        query, output_value=None, token_pooling=HierarchicalTokenPooling(pool_factor=2, tasks=["query", "document"])
     )
     assert skipped["token_embeddings"].shape == unpooled.shape
     assert opted_in["token_embeddings"].shape[0] < unpooled.shape[0]

@@ -8,7 +8,7 @@ colpali-engine papers on hierarchical token pooling).
 This script shows the three ways to apply a pooling and prints both the token-count reduction and
 the MaxSim scores against a sample query so you can see how much recall shifts.
 
-1. Per-call at encode time: ``model.encode_document(..., pooling=pooling)``.
+1. Per-call at encode time: ``model.encode_document(..., token_pooling=pooling)``.
 2. Standalone on already-encoded embeddings: ``pooling.pool(embeddings)``.
 3. As a pipeline module (uncomment the block below to bake it into the model itself).
 """
@@ -36,10 +36,10 @@ def main() -> None:
     print(f"  scores vs query: {[round(s, 3) for s in baseline_scores]}")
 
     # (1) Per-call: apply pooling as part of the encode call.
-    print("\nPer-call pooling via encode(pooling=...):")
+    print("\nPer-call pooling via encode(token_pooling=...):")
     for pool_factor in (2, 3, 6):
         pooling = HierarchicalTokenPooling(pool_factor=pool_factor)
-        pooled = model.encode_document(documents, pooling=pooling, convert_to_tensor=True)
+        pooled = model.encode_document(documents, token_pooling=pooling, convert_to_tensor=True)
         pooled_tokens = sum(emb.shape[0] for emb in pooled)
         ratio = baseline_tokens / max(pooled_tokens, 1)
         scores = model.similarity(query_emb, pooled)[0].tolist()

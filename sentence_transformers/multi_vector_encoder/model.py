@@ -222,7 +222,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> np.ndarray: ...
 
@@ -243,7 +243,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> Tensor: ...
 
@@ -264,7 +264,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> Tensor: ...
 
@@ -285,7 +285,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> dict[str, Tensor]: ...
 
@@ -305,7 +305,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> list[np.ndarray]: ...
 
@@ -326,7 +326,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> list[Tensor]: ...
 
@@ -347,7 +347,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> list[Tensor]: ...
 
@@ -368,7 +368,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> list[dict[str, Tensor]]: ...
 
@@ -389,7 +389,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> list[Tensor] | list[np.ndarray] | Tensor | np.ndarray | list[dict[str, Tensor]] | dict[str, Tensor]: ...
 
@@ -408,7 +408,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = False,
         pool: dict[Literal["input", "output", "processes"], Any] | None = None,
         chunk_size: int | None = None,
-        pooling: BaseTokenPooling | None = None,
+        token_pooling: BaseTokenPooling | None = None,
         **kwargs: Any,
     ) -> list[Tensor] | list[np.ndarray] | Tensor | np.ndarray | list[dict[str, Tensor]] | dict[str, Tensor]:
         """Compute query embeddings. Uses the "query" prompt if available and routes through the query side.
@@ -437,7 +437,7 @@ class MultiVectorEncoder(BaseModel):
             normalize_embeddings=normalize_embeddings,
             pool=pool,
             chunk_size=chunk_size,
-            pooling=pooling,
+            token_pooling=token_pooling,
             task="query",
             **kwargs,
         )
@@ -458,7 +458,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> np.ndarray: ...
 
@@ -479,7 +479,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> Tensor: ...
 
@@ -500,7 +500,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> Tensor: ...
 
@@ -521,7 +521,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> dict[str, Tensor]: ...
 
@@ -541,7 +541,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> list[np.ndarray]: ...
 
@@ -562,7 +562,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> list[Tensor]: ...
 
@@ -583,7 +583,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> list[Tensor]: ...
 
@@ -604,7 +604,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> list[dict[str, Tensor]]: ...
 
@@ -625,7 +625,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> list[Tensor] | list[np.ndarray] | Tensor | np.ndarray | list[dict[str, Tensor]] | dict[str, Tensor]: ...
 
@@ -644,7 +644,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = False,
         pool: dict[Literal["input", "output", "processes"], Any] | None = None,
         chunk_size: int | None = None,
-        pooling: BaseTokenPooling | None = None,
+        token_pooling: BaseTokenPooling | None = None,
         **kwargs: Any,
     ) -> list[Tensor] | list[np.ndarray] | Tensor | np.ndarray | list[dict[str, Tensor]] | dict[str, Tensor]:
         """Compute document embeddings. Uses the first available of ``"document"`` / ``"passage"`` / ``"corpus"``
@@ -677,7 +677,7 @@ class MultiVectorEncoder(BaseModel):
             normalize_embeddings=normalize_embeddings,
             pool=pool,
             chunk_size=chunk_size,
-            pooling=pooling,
+            token_pooling=token_pooling,
             task="document",
             **kwargs,
         )
@@ -698,7 +698,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         task: str | None = ...,
         **kwargs: Any,
     ) -> np.ndarray: ...
@@ -720,7 +720,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         task: str | None = ...,
         **kwargs: Any,
     ) -> Tensor: ...
@@ -742,7 +742,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         task: str | None = ...,
         **kwargs: Any,
     ) -> Tensor: ...
@@ -764,7 +764,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         task: str | None = ...,
         **kwargs: Any,
     ) -> dict[str, Tensor]: ...
@@ -785,7 +785,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         task: str | None = ...,
         **kwargs: Any,
     ) -> list[np.ndarray]: ...
@@ -807,7 +807,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         task: str | None = ...,
         **kwargs: Any,
     ) -> list[Tensor]: ...
@@ -829,7 +829,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         task: str | None = ...,
         **kwargs: Any,
     ) -> list[Tensor]: ...
@@ -851,7 +851,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         task: str | None = ...,
         **kwargs: Any,
     ) -> list[dict[str, Tensor]]: ...
@@ -873,7 +873,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = ...,
         pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
         chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
+        token_pooling: BaseTokenPooling | None = ...,
         task: str | None = ...,
         **kwargs: Any,
     ) -> list[Tensor] | list[np.ndarray] | Tensor | np.ndarray | list[dict[str, Tensor]] | dict[str, Tensor]: ...
@@ -893,7 +893,7 @@ class MultiVectorEncoder(BaseModel):
         normalize_embeddings: bool = False,
         pool: dict[Literal["input", "output", "processes"], Any] | None = None,
         chunk_size: int | None = None,
-        pooling: BaseTokenPooling | None = None,
+        token_pooling: BaseTokenPooling | None = None,
         task: str | None = None,
         **kwargs: Any,
     ) -> list[Tensor] | list[np.ndarray] | Tensor | np.ndarray | list[dict[str, Tensor]] | dict[str, Tensor]:
@@ -917,7 +917,7 @@ class MultiVectorEncoder(BaseModel):
                 output dicts instead: every feature key (``token_embeddings``, ``attention_mask``,
                 and any extra keys custom modules wrote), unsliced and padded to each batch's
                 longest input. With ``None``, normalization, ``precision``, and the
-                ``convert_to_*`` options do not apply. Per-call ``pooling`` does apply: it
+                ``convert_to_*`` options do not apply. Per-call ``token_pooling`` does apply: it
                 rewrites ``token_embeddings`` and ``attention_mask`` in the dicts.
             convert_to_tensor (bool, optional): If True, returns a list of :class:`torch.Tensor`. Overrides
                 ``convert_to_numpy``. Defaults to False.
@@ -934,7 +934,7 @@ class MultiVectorEncoder(BaseModel):
                 Defaults to False.
             pool (dict, optional): A multi-process pool created via :meth:`start_multi_process_pool`.
             chunk_size (int, optional): Chunk size for multi-process encoding.
-            pooling (BaseTokenPooling, optional): Per-call token pooling applied after the pipeline
+            token_pooling (BaseTokenPooling, optional): Per-call token pooling applied after the pipeline
                 to embeddings whose ``task`` is in the pooling's ``tasks`` (by default only
                 documents). If the model already bakes a pooling into its pipeline, this
                 compounds on top of it (pooling further). A one-time note is logged so the case is
@@ -1000,7 +1000,7 @@ class MultiVectorEncoder(BaseModel):
                 # Quantize once after merging, not per-worker: int8/uint8 calibration ranges would differ per chunk.
                 precision="float32",
                 normalize_embeddings=normalize_embeddings,
-                pooling=pooling,
+                token_pooling=token_pooling,
                 task=task,
                 **kwargs,
             )
@@ -1036,14 +1036,16 @@ class MultiVectorEncoder(BaseModel):
                 if output_value is None:
                     # Unlike normalization and precision, pooling applies here, as ST's truncate_dim does.
                     # The pooling's own ``tasks`` gate decides whether this task is pooled.
-                    if pooling is not None:
-                        if pooling.applies_to(task) and any(isinstance(module, BaseTokenPooling) for module in self):
+                    if token_pooling is not None:
+                        if token_pooling.applies_to(task) and any(
+                            isinstance(module, BaseTokenPooling) for module in self
+                        ):
                             logger.warning_once(
                                 "This model already includes a token pooling in its pipeline: the per-call "
-                                "`pooling=` pools further on top of it (compounding). Omit it if you only want "
-                                "the model's built-in pooling."
+                                "`token_pooling=` pools further on top of it (compounding). Omit it if you only "
+                                "want the model's built-in pooling."
                             )
-                        features = pooling(features, task=task)
+                        features = token_pooling(features, task=task)
                     # Raw per-input module outputs, unsliced. Batch-first tensors are split per
                     # input, other values (ints, strings, flattened tensors) are carried as-is.
                     for idx in range(len(inputs_batch)):
@@ -1066,14 +1068,14 @@ class MultiVectorEncoder(BaseModel):
             # Per-call pooling. The pooling's own ``tasks`` gate decides whether this task is
             # pooled. Compounds on top of any pooling baked into the pipeline (supported, but
             # noted once in case it's unexpected).
-            if pooling is not None:
-                if pooling.applies_to(task) and any(isinstance(module, BaseTokenPooling) for module in self):
+            if token_pooling is not None:
+                if token_pooling.applies_to(task) and any(isinstance(module, BaseTokenPooling) for module in self):
                     logger.warning_once(
                         "This model already includes a token pooling in its pipeline: the per-call "
-                        "`pooling=` pools further on top of it (compounding). Omit it if you only want "
-                        "the model's built-in pooling."
+                        "`token_pooling=` pools further on top of it (compounding). Omit it if you only "
+                        "want the model's built-in pooling."
                     )
-                batch_embeddings = pooling.pool(batch_embeddings, task=task)
+                batch_embeddings = token_pooling.pool(batch_embeddings, task=task)
 
             if convert_to_numpy:
                 batch_embeddings = [emb.cpu() for emb in batch_embeddings]

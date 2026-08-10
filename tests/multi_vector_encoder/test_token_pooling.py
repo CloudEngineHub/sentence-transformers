@@ -243,7 +243,7 @@ class TestEncodeWithPooling:
         without = model.encode_document([text], convert_to_tensor=True)[0]
         with_pooling = model.encode_document(
             [text],
-            pooling=HierarchicalTokenPooling(pool_factor=2),
+            token_pooling=HierarchicalTokenPooling(pool_factor=2),
             convert_to_tensor=True,
         )[0]
         assert with_pooling.shape[0] < without.shape[0]
@@ -256,7 +256,7 @@ class TestEncodeWithPooling:
         text = "some longer text with multiple tokens"
         out = model.encode_document(
             [text],
-            pooling=LambdaTokenPooling(pool_fn=keep_first_two),
+            token_pooling=LambdaTokenPooling(pool_fn=keep_first_two),
             convert_to_tensor=True,
         )[0]
         assert out.shape[0] == 2
@@ -267,7 +267,7 @@ class TestEncodeWithPooling:
         without = model.encode_query([text], convert_to_tensor=True)[0]
         with_pooling = model.encode_query(
             [text],
-            pooling=HierarchicalTokenPooling(pool_factor=2),
+            token_pooling=HierarchicalTokenPooling(pool_factor=2),
             convert_to_tensor=True,
         )[0]
         # Queries pass through unchanged: shape AND values must match (guards against silent mutation).
@@ -280,7 +280,7 @@ class TestEncodeWithPooling:
         without = model.encode_query([text], convert_to_tensor=True)[0]
         pooled = model.encode_query(
             [text],
-            pooling=HierarchicalTokenPooling(pool_factor=2, tasks=["query", "document"]),
+            token_pooling=HierarchicalTokenPooling(pool_factor=2, tasks=["query", "document"]),
             convert_to_tensor=True,
         )[0]
         assert pooled.shape[0] < without.shape[0]
@@ -294,7 +294,7 @@ class TestEncodeWithPooling:
         without = model.encode_document(texts, convert_to_tensor=True)
         with_pooling = model.encode_document(
             texts,
-            pooling=HierarchicalTokenPooling(pool_factor=2),
+            token_pooling=HierarchicalTokenPooling(pool_factor=2),
             convert_to_tensor=True,
         )
         # Pooled output has strictly fewer tokens per doc than the un-pooled version.

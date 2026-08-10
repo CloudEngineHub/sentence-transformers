@@ -6,7 +6,7 @@ Reduce each document's per-token embedding count to lower storage cost. Three wa
    put a :class:`HierarchicalTokenPooling` (or any :class:`BaseTokenPooling` subclass) at the end of
    the modules list to bake pooling into the checkpoint. Every consumer of the saved model gets
    the pooled output.
-2. Per-call at encode time: users pass ``pooling=`` to
+2. Per-call at encode time: users pass ``token_pooling=`` to
    :meth:`~sentence_transformers.MultiVectorEncoder.encode` / ``encode_query`` / ``encode_document``
    to opt in to pooling for a specific call.
 3. Standalone: users call :meth:`BaseTokenPooling.pool` on already-encoded embeddings to compress
@@ -69,7 +69,7 @@ def _pad_to_3d(embeddings: list[Tensor], padding_side: str) -> Tensor:
 class BaseTokenPooling(Module, ABC):
     """Abstract base for token pooling strategies. Subclasses implement :meth:`pool_one` (per-sample
     pooling) and set ``config_keys`` for save/load. See the module docstring for the three ways to
-    apply a pooling (pipeline module, per-call ``pooling=`` kwarg, standalone :meth:`pool`).
+    apply a pooling (pipeline module, per-call ``token_pooling=`` kwarg, standalone :meth:`pool`).
 
     Args:
         tasks: Task names this pooling applies to. A single string counts as a one-element list.
@@ -300,6 +300,6 @@ class LambdaTokenPooling(BaseTokenPooling):
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
         raise NotImplementedError(
             "LambdaTokenPooling wraps a user-supplied Python callable and cannot be saved. Use "
-            "it standalone or per-call to encode(pooling=...). For a saveable pipeline module, "
+            "it standalone or per-call to encode(token_pooling=...). For a saveable pipeline module, "
             "subclass BaseTokenPooling with your own class."
         )
