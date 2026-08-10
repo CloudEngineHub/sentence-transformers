@@ -314,7 +314,7 @@ def test_trainer_featureless_iterable_dataset_hint_covers_list_columns(
 
     message = str(excinfo.value)
     assert "null" not in message
-    assert "'sentence1': Value('string')" in message
+    assert "'sentence1': Value('string')" in message or "'sentence1': Value(dtype='string', id=None)" in message
     assert "'scores': List(Value('float32'))" in message or "'scores': Sequence(" in message
 
 

@@ -8,7 +8,7 @@ import torch
 from numpy import ndarray
 from sklearn.metrics import pairwise_distances
 from torch import Tensor
-from transformers.utils import logging
+from transformers.utils import is_torchdynamo_compiling, logging
 
 from .tensor import _convert_to_batch_tensor, _convert_to_tensor, normalize_embeddings, to_scipy_coo
 
@@ -476,7 +476,8 @@ def _fill_empty_document_scores(scores: Tensor, empty: Tensor) -> Tensor:
     scoring call and is a data-dependent branch that :func:`torch.compile` cannot capture, so only
     the warning reads it, and only where that is free.
     """
-    if not torch.compiler.is_compiling() and empty.device.type == "cpu" and empty.any():
+    # transformers' shim over torch.compiler.is_compiling(), which torch only added in 2.3.
+    if not is_torchdynamo_compiling() and empty.device.type == "cpu" and empty.any():
         logger.warning_once(
             "Encountered documents without any scoreable token during multi-vector similarity scoring, "
             "e.g. because MultiVectorMask (via keep_only_token_ids or skiplist_words) masked out every "

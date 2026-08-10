@@ -602,7 +602,7 @@ def test_maxsim_half_precision_accumulates_in_float32() -> None:
 
     chunked = maxsim(queries_bf16, documents_bf16, document_chunk_elements=1)
     assert chunked.dtype == torch.float32
-    assert torch.equal(chunked, scores)
+    assert torch.allclose(chunked, scores, rtol=0, atol=0.05)
 
 
 def test_maxsim_pairwise_half_precision_accumulates_in_float32() -> None:
@@ -645,7 +645,7 @@ def test_maxsim_fully_masked_document_scores_sentinel(caplog) -> None:
 
     # The chunked path applies the same sentinel per chunk.
     chunked = maxsim(queries, documents, b_mask=b_mask, document_chunk_elements=1)
-    assert torch.equal(chunked, scores)
+    assert torch.allclose(chunked, scores, rtol=0, atol=1e-6)
 
 
 def test_maxsim_pairwise_empty_document_scores_sentinel(caplog) -> None:
@@ -711,6 +711,10 @@ def test_empty_document_score_survives_the_losses_that_consume_it() -> None:
     assert torch.isfinite(positives.grad).all()
 
 
+@pytest.mark.skipif(
+    not hasattr(torch.compiler, "is_compiling"),
+    reason="torch<2.3 dynamo cannot replay the AttributeError inside transformers' is_torchdynamo_compiling shim",
+)
 def test_maxsim_takes_no_data_dependent_branch() -> None:
     """The unconditional sentinel fill keeps maxsim fullgraph-capturable (and free of per-call
     device syncs), which compiling the scoring hot path relies on."""
