@@ -137,7 +137,7 @@ class MultiVectorEncoder(BaseModel):
     _default_prompts: dict[str, str | None] = {"query": None, "document": None}
     _model_card_model_id_placeholder = "multi_vector_encoder_model_id"
     model_type: str = "MultiVectorEncoder"
-    _SUPPORTED_SIMILARITY_FN_NAMES: ClassVar[tuple[str, ...]] = (SimilarityFunction.MAXSIM.value,)
+    SUPPORTED_SIMILARITY_FN_NAMES: ClassVar[tuple[str, ...]] = (SimilarityFunction.MAXSIM.value,)
 
     def __init__(
         self,
@@ -184,14 +184,9 @@ class MultiVectorEncoder(BaseModel):
         )
         self.model_card_data: MultiVectorEncoderModelCardData
 
-        self._apply_legacy_fixups()
-
         module_list = list(self._modules.values())
         for index, module in enumerate(module_list):
-            # Resolve any MultiVectorMask's skiplist words against the tokenizer.
-            if isinstance(module, MultiVectorMask):
-                module.resolve_with_tokenizer(self.tokenizer)
-            elif (
+            if (
                 isinstance(module, Transformer)
                 and module.query_expansion is not None
                 and not any(isinstance(follower, MultiVectorMask) for follower in module_list[index + 1 :])
@@ -222,7 +217,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] = ...,
         convert_to_tensor: Literal[False] = ...,
         convert_to_numpy: Literal[True] = ...,
-        convert_to_padded_tensor: Literal[False] = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -244,7 +238,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] = ...,
         convert_to_tensor: Literal[True],
         convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: bool = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -266,29 +259,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] = ...,
         convert_to_tensor: bool = ...,
         convert_to_numpy: Literal[False],
-        convert_to_padded_tensor: bool = ...,
-        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
-        device: str | torch.device | list[str | torch.device] | None = ...,
-        normalize_embeddings: bool = ...,
-        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
-        chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
-        **kwargs: Any,
-    ) -> Tensor: ...
-
-    @overload
-    def encode_query(
-        self,
-        inputs: SingleInput,
-        prompt_name: str | None = ...,
-        prompt: str | None = ...,
-        batch_size: int = ...,
-        show_progress_bar: bool | None = ...,
-        *,
-        output_value: Literal["token_embeddings"] = ...,
-        convert_to_tensor: bool = ...,
-        convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: Literal[True],
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -310,7 +280,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: None,
         convert_to_tensor: bool = ...,
         convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: bool = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -331,7 +300,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] = ...,
         convert_to_tensor: Literal[False] = ...,
         convert_to_numpy: Literal[True] = ...,
-        convert_to_padded_tensor: Literal[False] = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -353,7 +321,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] = ...,
         convert_to_tensor: Literal[True],
         convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: Literal[False] = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -375,7 +342,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] = ...,
         convert_to_tensor: bool = ...,
         convert_to_numpy: Literal[False],
-        convert_to_padded_tensor: Literal[False] = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -394,32 +360,9 @@ class MultiVectorEncoder(BaseModel):
         batch_size: int = ...,
         show_progress_bar: bool | None = ...,
         *,
-        output_value: Literal["token_embeddings"] = ...,
-        convert_to_tensor: bool = ...,
-        convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: Literal[True],
-        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
-        device: str | torch.device | list[str | torch.device] | None = ...,
-        normalize_embeddings: bool = ...,
-        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
-        chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
-        **kwargs: Any,
-    ) -> Tensor: ...
-
-    @overload
-    def encode_query(
-        self,
-        inputs: Sequence[SingleInput],
-        prompt_name: str | None = ...,
-        prompt: str | None = ...,
-        batch_size: int = ...,
-        show_progress_bar: bool | None = ...,
-        *,
         output_value: None,
         convert_to_tensor: bool = ...,
         convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: bool = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -441,7 +384,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] | None = ...,
         convert_to_tensor: bool = ...,
         convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: bool = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -461,7 +403,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] | None = "token_embeddings",
         convert_to_tensor: bool = False,
         convert_to_numpy: bool = True,
-        convert_to_padded_tensor: bool = False,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = "float32",
         device: str | torch.device | list[str | torch.device] | None = None,
         normalize_embeddings: bool = False,
@@ -491,7 +432,6 @@ class MultiVectorEncoder(BaseModel):
             output_value=output_value,
             convert_to_tensor=convert_to_tensor,
             convert_to_numpy=convert_to_numpy,
-            convert_to_padded_tensor=convert_to_padded_tensor,
             precision=precision,
             device=device,
             normalize_embeddings=normalize_embeddings,
@@ -513,7 +453,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] = ...,
         convert_to_tensor: Literal[False] = ...,
         convert_to_numpy: Literal[True] = ...,
-        convert_to_padded_tensor: Literal[False] = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -535,7 +474,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] = ...,
         convert_to_tensor: Literal[True],
         convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: bool = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -557,29 +495,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] = ...,
         convert_to_tensor: bool = ...,
         convert_to_numpy: Literal[False],
-        convert_to_padded_tensor: bool = ...,
-        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
-        device: str | torch.device | list[str | torch.device] | None = ...,
-        normalize_embeddings: bool = ...,
-        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
-        chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
-        **kwargs: Any,
-    ) -> Tensor: ...
-
-    @overload
-    def encode_document(
-        self,
-        inputs: SingleInput,
-        prompt_name: str | None = ...,
-        prompt: str | None = ...,
-        batch_size: int = ...,
-        show_progress_bar: bool | None = ...,
-        *,
-        output_value: Literal["token_embeddings"] = ...,
-        convert_to_tensor: bool = ...,
-        convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: Literal[True],
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -601,7 +516,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: None,
         convert_to_tensor: bool = ...,
         convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: bool = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -622,7 +536,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] = ...,
         convert_to_tensor: Literal[False] = ...,
         convert_to_numpy: Literal[True] = ...,
-        convert_to_padded_tensor: Literal[False] = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -644,7 +557,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] = ...,
         convert_to_tensor: Literal[True],
         convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: Literal[False] = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -666,7 +578,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] = ...,
         convert_to_tensor: bool = ...,
         convert_to_numpy: Literal[False],
-        convert_to_padded_tensor: Literal[False] = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -685,32 +596,9 @@ class MultiVectorEncoder(BaseModel):
         batch_size: int = ...,
         show_progress_bar: bool | None = ...,
         *,
-        output_value: Literal["token_embeddings"] = ...,
-        convert_to_tensor: bool = ...,
-        convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: Literal[True],
-        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
-        device: str | torch.device | list[str | torch.device] | None = ...,
-        normalize_embeddings: bool = ...,
-        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
-        chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
-        **kwargs: Any,
-    ) -> Tensor: ...
-
-    @overload
-    def encode_document(
-        self,
-        inputs: Sequence[SingleInput],
-        prompt_name: str | None = ...,
-        prompt: str | None = ...,
-        batch_size: int = ...,
-        show_progress_bar: bool | None = ...,
-        *,
         output_value: None,
         convert_to_tensor: bool = ...,
         convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: bool = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -732,7 +620,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] | None = ...,
         convert_to_tensor: bool = ...,
         convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: bool = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -752,7 +639,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] | None = "token_embeddings",
         convert_to_tensor: bool = False,
         convert_to_numpy: bool = True,
-        convert_to_padded_tensor: bool = False,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = "float32",
         device: str | torch.device | list[str | torch.device] | None = None,
         normalize_embeddings: bool = False,
@@ -786,7 +672,6 @@ class MultiVectorEncoder(BaseModel):
             output_value=output_value,
             convert_to_tensor=convert_to_tensor,
             convert_to_numpy=convert_to_numpy,
-            convert_to_padded_tensor=convert_to_padded_tensor,
             precision=precision,
             device=device,
             normalize_embeddings=normalize_embeddings,
@@ -808,7 +693,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] = ...,
         convert_to_tensor: Literal[False] = ...,
         convert_to_numpy: Literal[True] = ...,
-        convert_to_padded_tensor: Literal[False] = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -831,7 +715,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] = ...,
         convert_to_tensor: Literal[True],
         convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: bool = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -854,30 +737,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] = ...,
         convert_to_tensor: bool = ...,
         convert_to_numpy: Literal[False],
-        convert_to_padded_tensor: bool = ...,
-        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
-        device: str | torch.device | list[str | torch.device] | None = ...,
-        normalize_embeddings: bool = ...,
-        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
-        chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
-        task: str | None = ...,
-        **kwargs: Any,
-    ) -> Tensor: ...
-
-    @overload
-    def encode(
-        self,
-        inputs: SingleInput,
-        prompt_name: str | None = ...,
-        prompt: str | None = ...,
-        batch_size: int = ...,
-        show_progress_bar: bool | None = ...,
-        *,
-        output_value: Literal["token_embeddings"] = ...,
-        convert_to_tensor: bool = ...,
-        convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: Literal[True],
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -900,7 +759,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: None,
         convert_to_tensor: bool = ...,
         convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: bool = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -922,7 +780,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] = ...,
         convert_to_tensor: Literal[False] = ...,
         convert_to_numpy: Literal[True] = ...,
-        convert_to_padded_tensor: Literal[False] = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -945,7 +802,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] = ...,
         convert_to_tensor: Literal[True],
         convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: Literal[False] = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -968,7 +824,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] = ...,
         convert_to_tensor: bool = ...,
         convert_to_numpy: Literal[False],
-        convert_to_padded_tensor: Literal[False] = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -988,33 +843,9 @@ class MultiVectorEncoder(BaseModel):
         batch_size: int = ...,
         show_progress_bar: bool | None = ...,
         *,
-        output_value: Literal["token_embeddings"] = ...,
-        convert_to_tensor: bool = ...,
-        convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: Literal[True],
-        precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
-        device: str | torch.device | list[str | torch.device] | None = ...,
-        normalize_embeddings: bool = ...,
-        pool: dict[Literal["input", "output", "processes"], Any] | None = ...,
-        chunk_size: int | None = ...,
-        pooling: BaseTokenPooling | None = ...,
-        task: str | None = ...,
-        **kwargs: Any,
-    ) -> Tensor: ...
-
-    @overload
-    def encode(
-        self,
-        inputs: Sequence[SingleInput],
-        prompt_name: str | None = ...,
-        prompt: str | None = ...,
-        batch_size: int = ...,
-        show_progress_bar: bool | None = ...,
-        *,
         output_value: None,
         convert_to_tensor: bool = ...,
         convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: bool = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -1037,7 +868,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] | None = ...,
         convert_to_tensor: bool = ...,
         convert_to_numpy: bool = ...,
-        convert_to_padded_tensor: bool = ...,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = ...,
         device: str | torch.device | list[str | torch.device] | None = ...,
         normalize_embeddings: bool = ...,
@@ -1048,7 +878,6 @@ class MultiVectorEncoder(BaseModel):
         **kwargs: Any,
     ) -> list[Tensor] | list[np.ndarray] | Tensor | np.ndarray | list[dict[str, Tensor]] | dict[str, Tensor]: ...
 
-    # TODO (v6.0): Consider replacing convert_to_* with return_as / output_format
     def encode(
         self,
         inputs: Sequence[SingleInput] | SingleInput,
@@ -1059,7 +888,6 @@ class MultiVectorEncoder(BaseModel):
         output_value: Literal["token_embeddings"] | None = "token_embeddings",
         convert_to_tensor: bool = False,
         convert_to_numpy: bool = True,
-        convert_to_padded_tensor: bool = False,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = "float32",
         device: str | torch.device | list[str | torch.device] | None = None,
         normalize_embeddings: bool = False,
@@ -1094,13 +922,6 @@ class MultiVectorEncoder(BaseModel):
             convert_to_tensor (bool, optional): If True, returns a list of :class:`torch.Tensor`. Overrides
                 ``convert_to_numpy``. Defaults to False.
             convert_to_numpy (bool, optional): If True (default), returns a list of :class:`numpy.ndarray`.
-            convert_to_padded_tensor (bool, optional): If True, pad each input's per-token embedding to the
-                same length and return a single 3D :class:`torch.Tensor` of shape
-                ``(num_inputs, max_tokens, embedding_dim)`` instead of a variable-length list. The
-                padding-mask is reconstructable via ``(emb != 0).any(-1)``. Note that a real all-zero
-                token embedding (possible after token pooling, not in L2-normalized pipelines) aliases
-                with padding under that reconstruction and is skipped during scoring. Overrides
-                ``convert_to_numpy`` and ``convert_to_tensor`` (always returns a Tensor). Defaults to False.
             precision (str, optional): The output precision. One of ``"float32"``, ``"int8"``, ``"uint8"``,
                 ``"binary"``, ``"ubinary"``. Quantized ``"int8"`` / ``"uint8"`` embeddings stay scoreable
                 with ``model.similarity``. ``"binary"`` / ``"ubinary"`` are packed bits (8 dimensions per
@@ -1124,10 +945,9 @@ class MultiVectorEncoder(BaseModel):
 
         Returns:
             list[Tensor] | list[ndarray] | Tensor | ndarray: By default, a list of per-input 2D arrays of shape
-            ``(num_tokens_i, embedding_dim)`` (variable-length). With ``convert_to_padded_tensor=True``, a
-            single 3D :class:`torch.Tensor` of shape ``(num_inputs, max_tokens, embedding_dim)``. With
-            ``output_value=None``, a list of per-input feature dicts. If a single string is passed, the
-            outer list is unwrapped (e.g. a bare 2D array for the default).
+            ``(num_tokens_i, embedding_dim)`` (variable-length). With ``output_value=None``, a list of
+            per-input feature dicts (including each input's real ``attention_mask``). If a single string
+            is passed, the outer list is unwrapped (e.g. a bare 2D array for the default).
         """
         is_query = task == "query"
 
@@ -1144,10 +964,8 @@ class MultiVectorEncoder(BaseModel):
         if output_value is None:
             convert_to_tensor = False
             convert_to_numpy = False
-            convert_to_padded_tensor = False
 
-        # convert_to_tensor / convert_to_padded_tensor both produce Tensor output. Suppress numpy conversion.
-        if convert_to_tensor or convert_to_padded_tensor:
+        if convert_to_tensor:
             convert_to_numpy = False
 
         is_singular_input = self.is_singular_input(inputs)
@@ -1179,8 +997,6 @@ class MultiVectorEncoder(BaseModel):
                 output_value=output_value,
                 convert_to_tensor=convert_to_tensor,
                 convert_to_numpy=convert_to_numpy,
-                # Pad once after merging chunks, not per-worker: per-chunk max lengths would mismatch.
-                convert_to_padded_tensor=False,
                 # Quantize once after merging, not per-worker: int8/uint8 calibration ranges would differ per chunk.
                 precision="float32",
                 normalize_embeddings=normalize_embeddings,
@@ -1192,8 +1008,6 @@ class MultiVectorEncoder(BaseModel):
                 embeddings = quantize_embeddings(embeddings=embeddings, precision=precision)
                 if convert_to_tensor:
                     embeddings = [torch.from_numpy(emb) for emb in embeddings]
-            if convert_to_padded_tensor:
-                embeddings = self._stack_padded(embeddings)
             if is_singular_input:
                 embeddings = embeddings[0]
             return embeddings
@@ -1282,28 +1096,12 @@ class MultiVectorEncoder(BaseModel):
                 for emb in all_embeddings
             ]
 
-        if convert_to_padded_tensor:
-            result = self._stack_padded(all_embeddings)
-        else:
-            result = all_embeddings
+        result = all_embeddings
 
         if is_singular_input:
             result = result[0]
 
         return result
-
-    def _stack_padded(self, embeddings: Sequence[Tensor | np.ndarray]) -> Tensor:
-        """Pad a variable-length list of per-input 2D embeddings into one
-        ``(num_inputs, max_tokens, embedding_dim)`` tensor, padding with 0. Always right-padded
-        (regardless of the tokenizer's padding side): the input tokenizer's convention is not
-        reachable here because encode() already unpacked features via the mask into a list of 2D. The
-        padding mask is recoverable via ``(emb != 0).any(-1)``, with the caveat that a real all-zero
-        row (possible after token pooling) aliases with padding. See ``_zero_row_mask``.
-        """
-        if not embeddings:
-            return torch.empty(0, 0, self.get_embedding_dimension() or 0, device=self.device)
-        tensors = [torch.from_numpy(emb) if isinstance(emb, np.ndarray) else emb for emb in embeddings]
-        return torch.nn.utils.rnn.pad_sequence(tensors, batch_first=True, padding_value=0).to(self.device)
 
     @property
     def similarity_fn_name(self) -> Literal["maxsim"]:
@@ -1320,9 +1118,15 @@ class MultiVectorEncoder(BaseModel):
     ) -> None:
         if isinstance(value, SimilarityFunction):
             value = value.value
-        if value is not None and value not in self._SUPPORTED_SIMILARITY_FN_NAMES:
+        if value is not None and value not in self.SUPPORTED_SIMILARITY_FN_NAMES:
+            if value == "xtr":
+                raise ValueError(
+                    f"MultiVectorEncoder only supports {self.SUPPORTED_SIMILARITY_FN_NAMES} as the model-level "
+                    "similarity. XTR is a training-time scoring: pass xtr_scores (or a configured XTRScores) "
+                    "as a loss's similarity_fct instead. Evaluation and model.similarity score with MaxSim."
+                )
             raise ValueError(
-                f"MultiVectorEncoder only supports {self._SUPPORTED_SIMILARITY_FN_NAMES}, got {value!r}. "
+                f"MultiVectorEncoder only supports {self.SUPPORTED_SIMILARITY_FN_NAMES}, got {value!r}. "
                 "Cosine / dot / euclidean / manhattan are defined on single vectors and don't compose "
                 "with ragged per-token embeddings."
             )
@@ -1364,6 +1168,12 @@ class MultiVectorEncoder(BaseModel):
         config = super()._get_model_config()
         config["similarity_fn_name"] = self._similarity_fn_name
         return config
+
+    def _post_init(self) -> None:
+        # Legacy checkpoint fixups can add or replace modules, so they run before the base fires
+        # the module-ready hooks (e.g. MultiVectorMask's skiplist resolution).
+        self._apply_legacy_fixups()
+        super()._post_init()
 
     def _apply_legacy_fixups(self) -> None:
         """Patch up modules loaded from save formats that predate :class:`MultiVectorEncoder`
@@ -1429,7 +1239,7 @@ class MultiVectorEncoder(BaseModel):
         super()._parse_model_config(model_config)
         # Inherit a supported saved similarity_fn_name unless the user overrode it (legacy cosine/dot fall through).
         saved_similarity = model_config.get("similarity_fn_name")
-        if self._similarity_fn_name is None and saved_similarity in self._SUPPORTED_SIMILARITY_FN_NAMES:
+        if self._similarity_fn_name is None and saved_similarity in self.SUPPORTED_SIMILARITY_FN_NAMES:
             self.similarity_fn_name = saved_similarity
         # PyLate v3 (model_type == "ColBERT") saved a plain Transformer and only [Transformer, Dense]. Flag it
         # so _apply_legacy_fixups appends the missing MultiVectorMask + token-level Normalize.

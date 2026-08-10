@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import torch
 from torch import Tensor
 
+from sentence_transformers.base.modules import Transformer
+
 if TYPE_CHECKING:
     from PIL.Image import Image as PILImage
 
-    from sentence_transformers.base.modules import Transformer
     from sentence_transformers.multi_vector_encoder.model import MultiVectorEncoder
-
 
 # Seaborn's "mako" colormap from 9 sampled keys (linearly interpolated). <11/255 max RGB error
 # vs the actual 256-entry seaborn LUT, so the look matches without depending on matplotlib.
@@ -61,7 +61,12 @@ def real_query_token_slice(model: MultiVectorEncoder, query: str) -> slice:
     Works for both right-padded (PaliGemma) and left-padded (ColQwen2 / ColModernVBert)
     backbones by comparing the encoded sequences of an empty and the actual query.
     """
-    transformer = cast("Transformer", model[0])
+    transformer = next((module for module in model if isinstance(module, Transformer)), None)
+    if transformer is None:
+        raise ValueError(
+            "real_query_token_slice needs a Transformer module to re-tokenize the query, but this "
+            f"model has none: {[type(module).__name__ for module in model]}."
+        )
     # Render with the same prompt encode_query() would apply, otherwise a marker prefix like
     # ColBERT's "[Q] " lands inside the slice and pushes the last real token out of it.
     prompt = model.prompts.get("query")
@@ -264,3 +269,12 @@ def maxsim_heatmap(
     else:
         raise ValueError(f"aggregate must be one of ('sum', 'amax', 'none'), got {aggregate!r}.")
     return render_similarity_map_on_image(image, collapsed, alpha=alpha)
+
+
+__all__ = [
+    "get_n_patches",
+    "maxsim_heatmap",
+    "maxsim_similarity_map",
+    "real_query_token_slice",
+    "render_similarity_map_on_image",
+]

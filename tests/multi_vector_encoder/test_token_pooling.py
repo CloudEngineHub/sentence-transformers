@@ -277,23 +277,20 @@ class TestEncodeWithPooling:
         )[0]
         assert pooled.shape[0] < without.shape[0]
 
-    def test_encode_document_with_pooling_and_padded_tensor(self) -> None:
-        # Compose the pooling kwarg with convert_to_padded_tensor=True so the batch is re-padded
-        # to 3D after pooling. Verifies the two independent code paths cooperate.
+    def test_encode_document_with_pooling_shrinks_token_counts(self) -> None:
         model = MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
         texts = [
             "a fairly long document with plenty of distinct tokens for clustering here",
             "a much shorter text",
         ]
-        without = model.encode_document(texts, convert_to_padded_tensor=True)
+        without = model.encode_document(texts, convert_to_tensor=True)
         with_pooling = model.encode_document(
             texts,
             pooling=HierarchicalTokenPooling(pool_factor=2),
-            convert_to_padded_tensor=True,
+            convert_to_tensor=True,
         )
-        assert with_pooling.dim() == 3 and with_pooling.shape[0] == 2
         # Pooled output has strictly fewer tokens per doc than the un-pooled version.
-        assert with_pooling.shape[1] < without.shape[1]
+        assert all(pooled.shape[0] < plain.shape[0] for pooled, plain in zip(with_pooling, without))
 
 
 class TestTrainingGradientFlow:

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import torch
 from torch import Tensor
 from transformers.utils import logging
 
 from sentence_transformers.base.modules.module import Module
 from sentence_transformers.util.tensor import repad_flattened_features
+
+if TYPE_CHECKING:
+    from sentence_transformers.base.model import BaseModel
 
 logger = logging.get_logger(__name__)
 
@@ -69,6 +74,9 @@ class MultiVectorMask(Module):
         )
         # Resolved lazily by :meth:`resolve_with_tokenizer` once the tokenizer is finalised.
         self._skiplist_ids: Tensor | None = None
+
+    def on_model_ready(self, model: BaseModel) -> None:
+        self.resolve_with_tokenizer(model.tokenizer)
 
     def resolve_with_tokenizer(self, tokenizer) -> None:
         """Convert ``skiplist_words`` to token IDs using ``tokenizer``.

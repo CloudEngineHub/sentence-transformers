@@ -144,7 +144,7 @@ class SentenceTransformer(BaseModel, FitMixin):
     _default_prompts: dict[str, str | None] = {"query": None, "document": None}
     model_type: str = "SentenceTransformer"
     # Supported single-vector similarities. Multi-vector names (maxsim) would produce wrong shapes on 2D embeddings.
-    _SUPPORTED_SIMILARITY_FN_NAMES: ClassVar[tuple[str, ...]] = (
+    SUPPORTED_SIMILARITY_FN_NAMES: ClassVar[tuple[str, ...]] = (
         SimilarityFunction.COSINE.value,
         SimilarityFunction.DOT_PRODUCT.value,
         SimilarityFunction.EUCLIDEAN.value,
@@ -1040,11 +1040,11 @@ class SentenceTransformer(BaseModel, FitMixin):
     ) -> None:
         if isinstance(value, SimilarityFunction):
             value = value.value
-        if value is not None and value not in self._SUPPORTED_SIMILARITY_FN_NAMES:
+        if value is not None and value not in self.SUPPORTED_SIMILARITY_FN_NAMES:
             hint = " Use MultiVectorEncoder for MaxSim late-interaction scoring." if value == "maxsim" else ""
             raise ValueError(
                 f"{type(self).__name__} only supports similarity_fn_name in "
-                f"{self._SUPPORTED_SIMILARITY_FN_NAMES}, got {value!r}.{hint}"
+                f"{self.SUPPORTED_SIMILARITY_FN_NAMES}, got {value!r}.{hint}"
             )
         if value is not None:
             self._similarity = SimilarityFunction.to_similarity_fn(value)
@@ -1369,7 +1369,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         # Inherit a supported saved similarity_fn_name unless the user overrode it (multi-vector
         # names like "maxsim", e.g. from converted MultiVectorEncoder saves, fall through).
         saved_similarity = model_config.get("similarity_fn_name")
-        if self._similarity_fn_name is None and saved_similarity in self._SUPPORTED_SIMILARITY_FN_NAMES:
+        if self._similarity_fn_name is None and saved_similarity in self.SUPPORTED_SIMILARITY_FN_NAMES:
             self.similarity_fn_name = saved_similarity
         if self.truncate_dim is None:
             self.truncate_dim = model_config.get("truncate_dim", None)

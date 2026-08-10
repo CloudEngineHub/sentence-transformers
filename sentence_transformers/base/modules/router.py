@@ -4,6 +4,7 @@ import json
 import os
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 try:
     from typing import Self
@@ -18,6 +19,9 @@ from sentence_transformers.base.modality_types import MODALITY_TO_PROCESSOR_ARG,
 from sentence_transformers.base.modules.input_module import InputModule
 from sentence_transformers.base.modules.module import Module
 from sentence_transformers.util import import_module_class, load_dir_path
+
+if TYPE_CHECKING:
+    from sentence_transformers.base.model import BaseModel
 
 logger = logging.get_logger(__name__)
 
@@ -512,6 +516,14 @@ class Router(InputModule):
         if self.route_mappings:
             parts.append(f"route_mappings={self.route_mappings}")
         return ", ".join(parts)
+
+    def on_model_ready(self, model: BaseModel) -> None:
+        # The model only sees the Router in its top-level module list, so forward the hook to the
+        # routed modules. Without this, a route's module never resolves its model-dependent state.
+        for sub_modules in self.sub_modules.values():
+            for module in sub_modules:
+                if isinstance(module, Module):
+                    module.on_model_ready(model)
 
     def get_embedding_dimension(self) -> int | None:
         dims = []

@@ -14,7 +14,7 @@ from torch import nn
 
 from sentence_transformers import SentenceTransformer, SentenceTransformerTrainer, SentenceTransformerTrainingArguments
 from sentence_transformers.base.modality_types import Modality
-from sentence_transformers.base.modules import Dense, Normalize, Router
+from sentence_transformers.base.modules import Dense, Module, Normalize, Router
 from sentence_transformers.base.modules.input_module import InputModule
 from sentence_transformers.sentence_transformer.losses import MultipleNegativesRankingLoss
 from sentence_transformers.sentence_transformer.modules import StaticEmbedding
@@ -37,6 +37,21 @@ class MockModule(InputModule):
 
     def tokenize(self, texts, **kwargs):
         return {}
+
+    def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
+        pass
+
+
+class HookRecordingModule(Module):
+    def __init__(self):
+        super().__init__()
+        self.ready_model = None
+
+    def forward(self, features):
+        return features
+
+    def on_model_ready(self, model) -> None:
+        self.ready_model = model
 
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
         pass
@@ -1460,3 +1475,16 @@ def test_router_forward_unsorted_tuple_modality_from_features():
     result = router.forward(features)
     # InvertMockModule negates the embedding, confirming multimodal_route was used
     assert torch.equal(result["sentence_embedding"], -embedding)
+
+
+def test_router_forwards_on_model_ready_to_routed_modules():
+    """Routed modules are invisible to the model's top-level module list, so the Router forwards the
+    hook. Without it they never resolve their model-dependent state (e.g. MultiVectorMask's skiplist)."""
+    query_hook = HookRecordingModule()
+    document_hook = HookRecordingModule()
+    router = Router({"query": [MockModule(), query_hook], "document": [MockModule(), document_hook]})
+
+    model = SentenceTransformer(modules=[router])
+
+    assert query_hook.ready_model is model
+    assert document_hook.ready_model is model

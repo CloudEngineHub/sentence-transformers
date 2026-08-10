@@ -139,7 +139,7 @@ class SparseEncoder(BaseModel):
     _model_card_model_id_placeholder = "sparse_encoder_model_id"
     model_type: str = "SparseEncoder"
     # Supported single-vector similarities. Multi-vector names (maxsim) would produce wrong shapes on 2D embeddings.
-    _SUPPORTED_SIMILARITY_FN_NAMES: ClassVar[tuple[str, ...]] = (
+    SUPPORTED_SIMILARITY_FN_NAMES: ClassVar[tuple[str, ...]] = (
         SimilarityFunction.COSINE.value,
         SimilarityFunction.DOT_PRODUCT.value,
         SimilarityFunction.EUCLIDEAN.value,
@@ -799,7 +799,7 @@ class SparseEncoder(BaseModel):
         # Inherit a supported saved similarity_fn_name unless the user overrode it (multi-vector
         # names like "maxsim", e.g. from converted MultiVectorEncoder saves, fall through).
         saved_similarity = model_config.get("similarity_fn_name")
-        if self._similarity_fn_name is None and saved_similarity in self._SUPPORTED_SIMILARITY_FN_NAMES:
+        if self._similarity_fn_name is None and saved_similarity in self.SUPPORTED_SIMILARITY_FN_NAMES:
             self.similarity_fn_name = saved_similarity
 
     @property
@@ -826,11 +826,11 @@ class SparseEncoder(BaseModel):
     ) -> None:
         if isinstance(value, SimilarityFunction):
             value = value.value
-        if value is not None and value not in self._SUPPORTED_SIMILARITY_FN_NAMES:
+        if value is not None and value not in self.SUPPORTED_SIMILARITY_FN_NAMES:
             hint = " Use MultiVectorEncoder for MaxSim late-interaction scoring." if value == "maxsim" else ""
             raise ValueError(
                 f"{type(self).__name__} only supports similarity_fn_name in "
-                f"{self._SUPPORTED_SIMILARITY_FN_NAMES}, got {value!r}.{hint}"
+                f"{self.SUPPORTED_SIMILARITY_FN_NAMES}, got {value!r}.{hint}"
             )
         self._similarity_fn_name = value
 

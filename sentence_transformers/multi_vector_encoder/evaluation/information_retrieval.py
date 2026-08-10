@@ -4,6 +4,7 @@ from collections.abc import Callable, Sequence
 from functools import partial
 from typing import TYPE_CHECKING
 
+import torch
 from torch import Tensor
 from transformers.utils import logging as transformers_logging
 
@@ -204,15 +205,18 @@ class MultiVectorInformationRetrievalEvaluator(InformationRetrievalEvaluator):
             encode_fn = model.encode_document
         else:
             encode_fn = model.encode
-        # Pre-pad queries (reused across every corpus chunk) so per-chunk maxsim does the cheap zero-row
-        # mask check instead of re-running pad_sequence each round. Documents are encoded per chunk.
-        return encode_fn(
+        embeddings = encode_fn(
             sentences,
             prompt_name=prompt_name,
             prompt=prompt,
             batch_size=self.batch_size,
             show_progress_bar=self.show_progress_bar,
             convert_to_tensor=True,
-            convert_to_padded_tensor=encode_fn_name == "query",
             **kwargs,
         )
+        if encode_fn_name == "query":
+            # Pre-pad queries (reused across every corpus chunk) so per-chunk maxsim does the cheap
+            # zero-row mask check instead of re-running pad_sequence each round. Documents are
+            # encoded per chunk.
+            embeddings = torch.nn.utils.rnn.pad_sequence(embeddings, batch_first=True)
+        return embeddings

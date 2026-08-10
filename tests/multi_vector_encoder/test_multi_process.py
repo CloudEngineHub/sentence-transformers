@@ -26,14 +26,6 @@ def test_multi_process_matches_single_process(model: MultiVectorEncoder) -> None
         assert torch.allclose(direct_emb, pooled_emb, atol=1e-5)
 
 
-def test_multi_process_convert_to_padded_tensor(model: MultiVectorEncoder) -> None:
-    # Padding happens once after merging chunks: per-chunk max lengths must not leak into the shape.
-    direct = model.encode_document(TEXTS, convert_to_padded_tensor=True)
-    pooled = model.encode_document(TEXTS, convert_to_padded_tensor=True, device=["cpu", "cpu"])
-    assert pooled.shape == direct.shape
-    assert torch.allclose(direct, pooled, atol=1e-5)
-
-
 def test_multi_process_int8_matches_single_process(model: MultiVectorEncoder) -> None:
     """int8/uint8 calibration ranges are computed from the batch: quantizing per worker chunk would
     give different buckets, so the pool path must quantize once after merging."""

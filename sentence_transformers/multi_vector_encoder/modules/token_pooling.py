@@ -66,7 +66,7 @@ def _pad_to_3d(embeddings: list[Tensor], padding_side: str) -> Tensor:
 
 
 class BaseTokenPooling(Module, ABC):
-    """Abstract base for token pooling strategies. Subclasses implement :meth:`_pool_one` (per-sample
+    """Abstract base for token pooling strategies. Subclasses implement :meth:`pool_one` (per-sample
     pooling) and set ``config_keys`` for save/load. See the module docstring for the three ways to
     apply a pooling (pipeline module, per-call ``pooling=`` kwarg, standalone :meth:`pool`).
 
@@ -92,7 +92,7 @@ class BaseTokenPooling(Module, ABC):
         if token_embeddings.shape[0] == 0:
             # Empty batch: keep the (0, T, D) shape and the (0, T) mask consistent with the input.
             return features
-        pooled_list = [self._pool_one(emb[m]) for emb, m in zip(token_embeddings, attention_mask)]
+        pooled_list = [self.pool_one(emb[m]) for emb, m in zip(token_embeddings, attention_mask)]
         # Always right-pad back to (B, max_t, D). The output padding side is an internal detail:
         # downstream consumers read the returned mask, not the side.
         padded = _pad_to_3d(pooled_list, padding_side="right").to(device)
@@ -133,17 +133,17 @@ class BaseTokenPooling(Module, ABC):
                 # Batch=0 short-circuit: preserve the input's (0, 0, D) shape.
                 return embeddings.new_zeros((0, 0, embeddings.shape[-1]))
             embeddings_list = _unbind_padded(embeddings, attention_mask, padding_side)
-            return _pad_to_3d([self._pool_one(e) for e in embeddings_list], padding_side)
+            return _pad_to_3d([self.pool_one(e) for e in embeddings_list], padding_side)
         if isinstance(embeddings, list):
             if not embeddings:
                 return []
             if embeddings[0].ndim != 2:
                 raise ValueError(f"list entries must be 2D tensors; got shape {tuple(embeddings[0].shape)}.")
-            return [self._pool_one(e) for e in embeddings]
+            return [self.pool_one(e) for e in embeddings]
         raise ValueError("embeddings must be a list of 2D tensors or a 3D padded tensor.")
 
     @abstractmethod
-    def _pool_one(self, embedding: Tensor, **kwargs) -> Tensor:
+    def pool_one(self, embedding: Tensor, **kwargs) -> Tensor:
         """Pool a single ``(num_tokens, D)`` tensor into a ``(num_out, D)`` tensor."""
 
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
@@ -223,7 +223,7 @@ class HierarchicalTokenPooling(BaseTokenPooling):
             return features
         return super().forward(features, task=task)
 
-    def _pool_one(self, embedding: Tensor, **kwargs) -> Tensor:
+    def pool_one(self, embedding: Tensor, **kwargs) -> Tensor:
         return _hierarchical_pool_one(embedding, self.pool_factor, self.num_protected_tokens)
 
 
@@ -254,7 +254,7 @@ class LambdaTokenPooling(BaseTokenPooling):
         super().__init__(pool_queries=pool_queries)
         self.pool_fn = pool_fn
 
-    def _pool_one(self, embedding: Tensor, **kwargs) -> Tensor:
+    def pool_one(self, embedding: Tensor, **kwargs) -> Tensor:
         return self.pool_fn(embedding)
 
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:

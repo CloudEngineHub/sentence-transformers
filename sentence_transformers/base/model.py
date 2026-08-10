@@ -273,6 +273,17 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
         # Pass the model to the model card data for later use
         self.model_card_data.register_model(self)
 
+        self._post_init()
+
+    def _post_init(self) -> None:
+        """Final construction step, called at the end of ``__init__``: fires every module's
+        :meth:`~sentence_transformers.base.modules.Module.on_model_ready` hook. Families override
+        it to run extra construction work first (e.g. legacy checkpoint fixups that add or replace
+        modules) and then call ``super()._post_init()``."""
+        for module in self._modules.values():
+            if isinstance(module, Module):
+                module.on_model_ready(self)
+
     def _validate_prompts(self) -> None:
         """Validate prompt configuration and log prompt information."""
         # Replace any remaining None prompts (not filled by saved config) with empty strings

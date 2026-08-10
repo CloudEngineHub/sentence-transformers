@@ -4,7 +4,7 @@ import json
 import os
 import warnings
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 try:
     from typing import Self
@@ -17,6 +17,9 @@ from safetensors.torch import load_model as load_safetensors_model
 from safetensors.torch import save_model as save_safetensors_model
 
 from sentence_transformers.util import load_dir_path, load_file_path
+
+if TYPE_CHECKING:
+    from sentence_transformers.base.model import BaseModel
 
 
 class Module(ABC, torch.nn.Module):
@@ -382,6 +385,17 @@ class Module(ABC, torch.nn.Module):
             model.load_state_dict(weights)
             return model
         return weights
+
+    def on_model_ready(self, model: BaseModel) -> None:
+        """
+        Hook called once the owning model is fully constructed, with every module, the tokenizer or
+        processor, and any legacy checkpoint fixups in place. Override it to resolve model-dependent
+        state, e.g. :class:`~sentence_transformers.multi_vector_encoder.modules.MultiVectorMask`
+        resolves its skiplist words against the model's tokenizer here. The default is a no-op.
+
+        Args:
+            model: The fully constructed model this module is part of.
+        """
 
     @abstractmethod
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:

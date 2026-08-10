@@ -66,7 +66,7 @@ class MultiVectorTripletEvaluator(TripletEvaluator):
         from sentence_transformers.multi_vector_encoder.model import MultiVectorEncoder
 
         functions = {}
-        for name in MultiVectorEncoder._SUPPORTED_SIMILARITY_FN_NAMES:
+        for name in MultiVectorEncoder.SUPPORTED_SIMILARITY_FN_NAMES:
             pairwise = SimilarityFunction.to_similarity_pairwise_fn(name)
             functions[name] = lambda a, p, n, pairwise=pairwise: (pairwise(a, p), pairwise(a, n))
         return functions

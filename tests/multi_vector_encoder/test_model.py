@@ -3,7 +3,6 @@ from __future__ import annotations
 import gc
 import sys
 import tempfile
-from typing import Literal
 
 import numpy as np
 import pytest
@@ -480,50 +479,32 @@ def test_parse_model_config_translates_pylate_expansion(model_config, expected_q
 
 
 @pytest.mark.parametrize(
-    ("convert_to_tensor", "convert_to_numpy", "convert_to_padded_tensor", "element_type"),
+    ("convert_to_tensor", "convert_to_numpy", "element_type"),
     [
-        (False, True, False, np.ndarray),  # default: variable-length list of arrays
-        (True, False, False, torch.Tensor),  # variable-length list of tensors
-        (False, False, False, torch.Tensor),  # variable-length list of raw (unconverted) tensors
-        # convert_to_padded_tensor always returns a Tensor (parallels convert_to_sparse_tensor):
-        (False, True, True, torch.Tensor),  # padded, convert_to_numpy is overridden
-        (True, False, True, torch.Tensor),  # padded
-        (False, False, True, torch.Tensor),  # padded
+        (False, True, np.ndarray),  # default: variable-length list of arrays
+        (True, False, torch.Tensor),  # variable-length list of tensors
+        (False, False, torch.Tensor),  # variable-length list of raw (unconverted) tensors
     ],
 )
 def test_encode_output_formats(
     model: MultiVectorEncoder,
     convert_to_tensor: bool,
     convert_to_numpy: bool,
-    convert_to_padded_tensor: bool,
     element_type: type,
 ) -> None:
-    # Two documents of clearly different length, so variable-length output is distinguishable from padded.
     docs = ["short doc", "a considerably longer document with many more distinct tokens than the first one"]
     dim = model.get_embedding_dimension()
     out = model.encode_document(
         docs,
         convert_to_tensor=convert_to_tensor,
         convert_to_numpy=convert_to_numpy,
-        convert_to_padded_tensor=convert_to_padded_tensor,
     )
 
-    if convert_to_padded_tensor:
-        # A single stacked container of shape (num_docs, max_tokens, dim), zero-padded.
-        assert isinstance(out, element_type)
-        assert out.ndim == 3
-        assert out.shape[0] == len(docs)
-        assert out.shape[2] == dim
-        # The padding mask is recoverable, and the shorter doc keeps fewer real tokens than the longer one.
-        real_tokens = (out != 0).any(axis=-1) if isinstance(out, np.ndarray) else (out != 0).any(dim=-1)
-        counts = real_tokens.sum(-1)
-        assert int(counts[0]) < int(counts[1])
-    else:
-        # A variable-length list with one 2D entry per document.
-        assert isinstance(out, list)
-        assert len(out) == len(docs)
-        assert all(isinstance(emb, element_type) and emb.ndim == 2 and emb.shape[1] == dim for emb in out)
-        assert out[0].shape[0] < out[1].shape[0]
+    # A variable-length list with one 2D entry per document.
+    assert isinstance(out, list)
+    assert len(out) == len(docs)
+    assert all(isinstance(emb, element_type) and emb.ndim == 2 and emb.shape[1] == dim for emb in out)
+    assert out[0].shape[0] < out[1].shape[0]
 
 
 def test_singular_input_unwraps(model: MultiVectorEncoder) -> None:
@@ -683,7 +664,6 @@ def test_encode_output_value_none_ignores_convert_flags(model: MultiVectorEncode
     """The convert_to_* options do not apply to raw feature dicts."""
     for outputs in (
         model.encode(["x", "y"], output_value=None, convert_to_tensor=True),
-        model.encode(["x", "y"], output_value=None, convert_to_padded_tensor=True),
         model.encode(["x", "y"], output_value=None, convert_to_numpy=True),
     ):
         assert isinstance(outputs, list)
@@ -1161,25 +1141,8 @@ def test_encode_pooling_skips_queries_on_raw_output(model: MultiVectorEncoder) -
     assert opted_in["token_embeddings"].shape[0] < unpooled.shape[0]
 
 
-def test_encode_empty_list_padded_shape(model: MultiVectorEncoder) -> None:
+def test_encode_empty_list(model: MultiVectorEncoder) -> None:
     assert model.encode([]) == []
-    padded = model.encode([], convert_to_padded_tensor=True)
-    # Shape-consistent with non-empty output, matching BaseTokenPooling.pool's batch=0 case, and
-    # on the same device, so it can be concatenated or scored alongside one.
-    non_empty = model.encode(["a document"], convert_to_padded_tensor=True)
-    assert padded.shape == (0, 0, model.get_embedding_dimension())
-    assert padded.device == non_empty.device
-    assert model.similarity(padded, non_empty).shape == (0, 1)
-
-
-@pytest.mark.parametrize("precision", ["float32", "int8"])
-def test_encode_padded_tensor_stays_on_model_device(
-    model: MultiVectorEncoder, precision: Literal["float32", "int8"]
-) -> None:
-    # Quantization restores tensors via torch.from_numpy, which lands on the CPU regardless of the
-    # model's device, so the padded output has to be normalized back.
-    padded = model.encode(["a document", "another one"], convert_to_padded_tensor=True, precision=precision)
-    assert padded.device == model.device
 
 
 def test_similarity_singular_query(model: MultiVectorEncoder) -> None:
@@ -1215,10 +1178,9 @@ def test_maxsim_basic_shapes() -> None:
 
 
 def test_maxsim_padded_tensor_without_mask_excludes_zero_rows() -> None:
-    """Without a mask, a pre-padded 3D tensor (the output of ``encode(convert_to_padded_tensor=True)``) had
-    its zero-pad rows counted as real tokens whose dot product 0 could win the max over negative
-    similarities. ``_pad_multi_vector_inputs`` now derives a mask from all-zero rows so the padded
-    tensor matches the list-input result."""
+    """Without a mask, a pre-padded 3D tensor had its zero-pad rows counted as real tokens whose dot
+    product 0 could win the max over negative similarities. ``_pad_multi_vector_inputs`` now derives
+    a mask from all-zero rows so the padded tensor matches the list-input result."""
     q_list = [torch.tensor([[1.0, 0.0]])]
     d_list = [torch.tensor([[-0.5, -0.5]])]
 
