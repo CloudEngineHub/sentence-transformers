@@ -42,7 +42,7 @@ def column_merging_disabled() -> Iterator[None]:
 
     For wrapper losses that call an inner loss several times with the *same* feature dicts and pass
     state between those calls through them, e.g.
-    :class:`~sentence_transformers.losses.AdaptiveLayerLoss`, whose ``TransformerDecorator`` writes
+    :class:`~sentence_transformers.sentence_transformer.losses.AdaptiveLayerLoss`, whose ``TransformerDecorator`` writes
     ``all_layer_embeddings`` into each dict on the first call and reads it back on the rest. Merging
     builds fresh dicts, so that hand-off would land on a dict the next call never sees.
     """

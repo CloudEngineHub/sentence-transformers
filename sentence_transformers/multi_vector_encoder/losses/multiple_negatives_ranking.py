@@ -31,7 +31,7 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
         model: A :class:`~sentence_transformers.MultiVectorEncoder` model.
         scale: ``1 / temperature``. Scores are multiplied by ``scale`` before cross-entropy. Defaults to
             ``1.0`` (``temperature=1.0``), matching PyLate. Unlike cosine similarity (bounded to
-            ``[-1, 1]``, where ST's dense :class:`~sentence_transformers.losses.MultipleNegativesRankingLoss`
+            ``[-1, 1]``, where ST's dense :class:`~sentence_transformers.sentence_transformer.losses.MultipleNegativesRankingLoss`
             uses ``scale=20.0`` to amplify the narrow range), MaxSim is an unbounded sum over query-token
             similarities (range ``~[0, num_query_tokens]``), so a scale near ``1.0`` makes sense, the same
             reason the dense loss recommends ``scale=1`` for dot-product similarity. With MeanMaxSim scoring

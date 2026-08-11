@@ -15,7 +15,7 @@ from sentence_transformers.util import similarity_fct_name
 class MultiVectorMarginMSELoss(nn.Module):
     """Margin-MSE distillation loss for :class:`~sentence_transformers.MultiVectorEncoder` models.
 
-    Adapted from the dense :class:`sentence_transformers.losses.MarginMSELoss`. Given a query, a positive
+    Adapted from the dense :class:`sentence_transformers.sentence_transformer.losses.MarginMSELoss`. Given a query, a positive
     document, and one or more negative documents, plus teacher margins ``score(q, pos) - score(q, neg)``,
     the student's MaxSim margins are MSE-matched to the teacher's.
 

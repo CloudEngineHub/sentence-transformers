@@ -33,7 +33,7 @@ class SparseDistillKLDivLoss(DistillKLDivLoss):
                 When combined with other losses, a temperature of 1.0 is also viable, but a higher temperature (e.g., 2.0 or 4.0)
                 can help prevent the student model from going to zero active dimensions. Defaults to 2.0.
             student_temperature: Student-side override of ``temperature``, see
-                :class:`~sentence_transformers.losses.DistillKLDivLoss` for the regime where the
+                :class:`~sentence_transformers.sentence_transformer.losses.DistillKLDivLoss` for the regime where the
                 temperature-squared scaling holds. Defaults to None.
             teacher_temperature: Teacher-side override of ``temperature``. Match it to the spread of
                 your teacher's scores: dividing by a temperature well below that spread collapses the
