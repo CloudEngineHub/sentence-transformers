@@ -1102,7 +1102,16 @@ class MultiVectorEncoder(BaseModel):
         """Compute the all-pairs score matrix between two collections of multi-vector embeddings, using
         this model's :attr:`similarity_fn_name`.
 
-        Returns a matrix of shape ``(num_embeddings_1, num_embeddings_2)``.
+        Args:
+            embeddings1 (Union[Tensor, ndarray, list]): Query embeddings, as a list of
+                [num_tokens_i, embedding_dim]-shaped tensors or arrays, a padded
+                [num_embeddings_1, num_tokens, embedding_dim]-shaped tensor, or a single
+                [num_tokens, embedding_dim]-shaped tensor scored as a batch of one.
+            embeddings2 (Union[Tensor, ndarray, list]): Document embeddings, in the same forms.
+
+        Returns:
+            Tensor: A [num_embeddings_1, num_embeddings_2]-shaped torch tensor with scores, on the
+            documents' device.
 
         Example::
 
@@ -1121,7 +1130,19 @@ class MultiVectorEncoder(BaseModel):
         embeddings2: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
     ) -> Tensor:
         """Compute the pairwise score vector between matched query / document pairs, using this
-        model's :attr:`similarity_fn_name`."""
+        model's :attr:`similarity_fn_name`.
+
+        Args:
+            embeddings1 (Union[Tensor, ndarray, list]): Query embeddings, as a list of
+                [num_tokens_i, embedding_dim]-shaped tensors or arrays, a padded
+                [num_embeddings, num_tokens, embedding_dim]-shaped tensor, or a single
+                [num_tokens, embedding_dim]-shaped tensor scored as a batch of one.
+            embeddings2 (Union[Tensor, ndarray, list]): Document embeddings, in the same forms.
+
+        Returns:
+            Tensor: A [num_embeddings]-shaped torch tensor with pairwise scores, on the documents'
+            device.
+        """
         self.similarity_fn_name  # noqa: B018 (trigger lazy init)
         return self._similarity_pairwise(embeddings1, embeddings2)
 

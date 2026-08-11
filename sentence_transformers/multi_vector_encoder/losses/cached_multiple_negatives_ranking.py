@@ -37,8 +37,6 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
     re-runs the embedding forward in chunks with gradients enabled, feeding the cached gradients into the
     final ``loss.backward()``.
 
-    Reference: https://github.com/luyug/GradCache (Gao et al., 2021).
-
     Args:
         model: A :class:`~sentence_transformers.MultiVectorEncoder`.
         scale: ``1 / temperature``. Scores are multiplied by ``scale`` before cross-entropy. Defaults to
@@ -64,6 +62,36 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
             usually the bottleneck at large effective batch sizes. Defaults to ``mini_batch_size``.
         gather_across_devices: If True, AllGather document embeddings across DDP ranks.
         show_progress_bar: If True, show a TQDM progress bar for the embedding / scoring steps.
+
+    References:
+        - GradCache, the caching strategy this loss implements: https://github.com/luyug/GradCache
+        - Scaling Deep Contrastive Learning Batch Size under Memory Limited Setup: https://huggingface.co/papers/2101.06983
+
+    Requirements:
+        1. (anchor, positive) pairs, (anchor, positive, negative) triplets, or (anchor, positive, negative_1, ..., negative_n) n-tuples
+        2. Should be used with a large ``per_device_train_batch_size`` and a low ``mini_batch_size`` for superior
+           performance, at the cost of slower training than :class:`MultiVectorMultipleNegativesRankingLoss`.
+
+    Inputs:
+        +-------------------------------------------------+--------+
+        | Inputs                                          | Labels |
+        +=================================================+========+
+        | (anchor, positive) pairs                        | none   |
+        +-------------------------------------------------+--------+
+        | (anchor, positive, negative) triplets           | none   |
+        +-------------------------------------------------+--------+
+        | (anchor, positive, negative_1, ..., negative_n) | none   |
+        +-------------------------------------------------+--------+
+
+    Recommendations:
+        - Use ``BatchSamplers.NO_DUPLICATES`` (:class:`docs <sentence_transformers.sentence_transformer.training_args.BatchSamplers>`)
+          to ensure that no in-batch negatives are duplicates of the anchor or positive samples.
+
+    Relations:
+        - Equivalent to :class:`MultiVectorMultipleNegativesRankingLoss`, but with caching that allows for much
+          higher batch sizes without extra memory usage, at the cost of slower training.
+        - The dense counterpart is
+          :class:`~sentence_transformers.sentence_transformer.losses.CachedMultipleNegativesRankingLoss`.
 
     Example:
         ::

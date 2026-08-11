@@ -24,14 +24,6 @@ class MultiVectorDistillKLDivLoss(nn.Module):
     and teacher scores ``(N,)``. This loss computes the model's MaxSim scores against the same documents
     and minimises the KL divergence between the softmaxed teacher and student distributions.
 
-    The expected input format, matching the standard multi-column convention:
-
-    - ``sentence_features[0]``: query features of shape ``(batch_size, q_tokens)``.
-    - ``sentence_features[1:]``: one feature dict per candidate document column, each of shape
-      ``(batch_size, d_tokens)``, i.e. dataset columns ``(query, document_1, ..., document_N)``.
-      :func:`~sentence_transformers.util.dataset.resolve_ids` produces this shape from ID-only KD datasets.
-    - ``labels``: teacher scores of shape ``(batch_size, N)``.
-
     Args:
         model: A :class:`~sentence_transformers.MultiVectorEncoder`.
         similarity_fct: Callable that, given queries ``(Q, q_tokens, dim)`` and stacked docs
@@ -58,6 +50,29 @@ class MultiVectorDistillKLDivLoss(nn.Module):
             own longest document, so a single long outlier document only widens its own chunk.
             Chunking is exact for this loss (no cross-row interactions). ``None`` (default) runs one
             merged forward.
+
+    References:
+        - For more details, please refer to https://huggingface.co/papers/2010.11386
+        - Separate student and teacher temperatures follow DenseOn / LateOn:
+          https://huggingface.co/papers/2607.27178
+
+    Requirements:
+        1. (query, document_1, ..., document_N) examples with at least two candidate documents
+        2. Labels containing the teacher model's score for each candidate document, shape ``(batch_size, N)``
+        3. :func:`~sentence_transformers.util.dataset.resolve_ids` produces this shape from ID-only KD datasets
+
+    Inputs:
+        +--------------------------------------+--------------------------------------------+
+        | Inputs                               | Labels                                     |
+        +======================================+============================================+
+        | (query, document_1, ..., document_N) | [Teacher(query, document_i) for i in 1..N] |
+        +--------------------------------------+--------------------------------------------+
+
+    Relations:
+        - :class:`MultiVectorMarginMSELoss` distills the same teacher scores, but matches margins with MSE
+          rather than matching the whole distribution with KL divergence.
+        - The dense counterpart is
+          :class:`~sentence_transformers.sentence_transformer.losses.DistillKLDivLoss`.
 
     Example:
         ::

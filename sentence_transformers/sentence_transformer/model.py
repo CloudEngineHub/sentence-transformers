@@ -1060,6 +1060,13 @@ class SentenceTransformer(BaseModel, FitMixin):
         Compute the similarity between two collections of embeddings. The output is a matrix with the
         similarity scores between all embeddings from the first parameter and all embeddings from the
         second parameter, computed with the similarity function set via ``similarity_fn_name``.
+
+        Args:
+            embeddings1 (Union[Tensor, ndarray]): [num_embeddings_1, embedding_dim] or [embedding_dim]-shaped numpy array or torch tensor.
+            embeddings2 (Union[Tensor, ndarray]): [num_embeddings_2, embedding_dim] or [embedding_dim]-shaped numpy array or torch tensor.
+
+        Returns:
+            Tensor: A [num_embeddings_1, num_embeddings_2]-shaped torch tensor with similarity scores.
         """
         # Access similarity_fn_name to trigger lazy initialization of _similarity
         self.similarity_fn_name  # noqa: B018
@@ -1073,6 +1080,13 @@ class SentenceTransformer(BaseModel, FitMixin):
         """
         Compute the pairwise similarity between two collections of embeddings, i.e. the similarity
         between ``embeddings1[i]`` and ``embeddings2[i]`` for each ``i``.
+
+        Args:
+            embeddings1 (Union[Tensor, ndarray]): [num_embeddings, embedding_dim] or [embedding_dim]-shaped numpy array or torch tensor.
+            embeddings2 (Union[Tensor, ndarray]): [num_embeddings, embedding_dim] or [embedding_dim]-shaped numpy array or torch tensor.
+
+        Returns:
+            Tensor: A [num_embeddings]-shaped torch tensor with pairwise similarity scores.
         """
         # Access similarity_fn_name to trigger lazy initialization of _similarity_pairwise
         self.similarity_fn_name  # noqa: B018

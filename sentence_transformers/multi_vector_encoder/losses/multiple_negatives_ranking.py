@@ -55,6 +55,9 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
         gather_across_devices: If True, AllGather document embeddings (and masks) across DDP ranks so that
             every rank's queries see the global batch of documents. Useful for very large effective batches.
 
+    Requirements:
+        1. (anchor, positive) pairs, (anchor, positive, negative) triplets, or (anchor, positive, negative_1, ..., negative_n) n-tuples
+
     Inputs:
         +-------------------------------------------------+--------+
         | Inputs                                          | Labels |
@@ -65,6 +68,17 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
         +-------------------------------------------------+--------+
         | (anchor, positive, negative_1, ..., negative_n) | none   |
         +-------------------------------------------------+--------+
+
+    Recommendations:
+        - Use ``BatchSamplers.NO_DUPLICATES`` (:class:`docs <sentence_transformers.sentence_transformer.training_args.BatchSamplers>`)
+          to ensure that no in-batch negatives are duplicates of the anchor or positive samples.
+
+    Relations:
+        - :class:`CachedMultiVectorMultipleNegativesRankingLoss` is equivalent to this loss, but it caches the
+          embedding pass so that much higher batch sizes fit in the same memory, at the cost of being slower.
+        - The dense counterpart is
+          :class:`~sentence_transformers.sentence_transformer.losses.MultipleNegativesRankingLoss`, which scores
+          pooled embeddings instead of per-token MaxSim.
 
     Example:
         ::

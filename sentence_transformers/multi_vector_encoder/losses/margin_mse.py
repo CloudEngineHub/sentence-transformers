@@ -19,15 +19,6 @@ class MultiVectorMarginMSELoss(nn.Module):
     document, and one or more negative documents, plus teacher margins ``score(q, pos) - score(q, neg)``,
     the student's MaxSim margins are MSE-matched to the teacher's.
 
-    With ``sentence_features = (query, positive, negative_1, ..., negative_k)``, two label formats are
-    supported:
-
-    1. **Margins**: ``labels`` of shape ``(batch_size, k)`` containing per-negative teacher margins
-       ``score(q, pos) - score(q, neg_i)``. With a single negative, shape ``(batch_size,)`` is also
-       accepted.
-    2. **Raw scores**: ``labels`` of shape ``(batch_size, k + 1)`` containing teacher scores
-       ``[score(q, pos), score(q, neg_1), ..., score(q, neg_k)]``, converted to margins internally.
-
     Args:
         model: A :class:`~sentence_transformers.MultiVectorEncoder`.
         similarity_fct: A pairwise scoring function, called as ``similarity_fct(queries_embeddings,
@@ -40,6 +31,35 @@ class MultiVectorMarginMSELoss(nn.Module):
             split into row chunks, each re-trimmed to its own longest document, so a single long
             outlier document only widens its own chunk. Chunking is exact for this loss (no
             cross-row interactions). ``None`` (default) runs one merged forward.
+
+    References:
+        - For more details, please refer to https://huggingface.co/papers/2010.02666
+
+    Requirements:
+        1. (query, positive, negative_1, ..., negative_k) examples
+        2. Labels holding either the teacher margins, shape ``(batch_size, k)``, or the raw teacher scores,
+           shape ``(batch_size, k + 1)``, which are converted to margins internally. With a single negative,
+           a flat ``(batch_size,)`` margin is also accepted.
+        3. Usually used with a finetuned teacher M in a knowledge distillation setup
+
+    Inputs:
+        +------------------------------------------------+-----------------------------------------------------------------------+
+        | Inputs                                         | Labels                                                                |
+        +================================================+=======================================================================+
+        | (query, positive, negative)                    | M(query, positive) - M(query, negative)                               |
+        +------------------------------------------------+-----------------------------------------------------------------------+
+        | (query, positive, negative)                    | [M(query, positive), M(query, negative)]                              |
+        +------------------------------------------------+-----------------------------------------------------------------------+
+        | (query, positive, negative_1, ..., negative_k) | [M(query, positive) - M(query, negative_i) for i in 1..k]             |
+        +------------------------------------------------+-----------------------------------------------------------------------+
+        | (query, positive, negative_1, ..., negative_k) | [M(query, positive), M(query, negative_1), ..., M(query, negative_k)] |
+        +------------------------------------------------+-----------------------------------------------------------------------+
+
+    Relations:
+        - :class:`MultiVectorDistillKLDivLoss` distills the same teacher scores, but matches the whole
+          distribution with KL divergence rather than matching margins with MSE.
+        - The dense counterpart is
+          :class:`~sentence_transformers.sentence_transformer.losses.MarginMSELoss`.
 
     Example:
         ::
