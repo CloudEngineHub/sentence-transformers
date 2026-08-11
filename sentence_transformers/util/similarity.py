@@ -407,7 +407,8 @@ def maxsim(
 
     Returns:
         Tensor: Matrix with ``res[i][j]`` = MaxSim(a[i], b[j]), shape ``(batch_a, batch_b)``, always
-        float32 (half precision inputs are accumulated in float32 to keep nearby scores distinct).
+        float32 (half precision inputs are accumulated in float32 to keep nearby scores distinct), on
+        the documents' device: CPU documents score on the CPU even against GPU queries.
     """
     a, a_mask = _canonicalize_side(a, a_mask, "a_mask")
     b, b_mask = _canonicalize_side(b, b_mask, "b_mask")
@@ -430,8 +431,7 @@ def maxsim(
         b_mask = _fit_mask_width(b_mask, max(document_widths), "b_mask")
 
     # Scoring runs on the documents' device: they are the big side, and the queries are cheap to move.
-    # numpy documents carry no device of their own, so those follow the queries instead of dragging a
-    # gpu workload onto the cpu.
+    # numpy documents carry no device of their own, so those follow the queries.
     device = _embeddings_device(b) or a.device
     a, a_mask_padded = _to_device(a, a_mask_padded, device)
 
@@ -548,7 +548,8 @@ def maxsim_pairwise(
 
     Returns:
         Tensor: Vector with ``res[i]`` = MaxSim(a[i], b[i]), shape ``(batch,)``, always float32
-        (half precision inputs are accumulated in float32 to keep nearby scores distinct).
+        (half precision inputs are accumulated in float32 to keep nearby scores distinct), on the
+        documents' device: CPU documents score on the CPU even against GPU queries.
     """
     a, a_mask = _canonicalize_side(a, a_mask, "a_mask")
     b, b_mask = _canonicalize_side(b, b_mask, "b_mask")
