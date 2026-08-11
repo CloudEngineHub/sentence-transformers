@@ -186,7 +186,7 @@ class XTRScores:
         document_chunk_elements: Element budget for the chunked matmul phase, see :func:`xtr_scores`.
     """
 
-    def __init__(self, top_k: int = 256, document_chunk_elements: int | None = None) -> None:
+    def __init__(self, top_k: int = 256, *, document_chunk_elements: int | None = None) -> None:
         self.top_k = top_k
         self.document_chunk_elements = document_chunk_elements
 

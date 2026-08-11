@@ -64,6 +64,7 @@ class MultiVectorRerankingEvaluator(RerankingEvaluator):
     def __init__(
         self,
         samples: list[dict],
+        *,
         at_k: int = 10,
         name: str = "",
         write_csv: bool = True,

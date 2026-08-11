@@ -82,7 +82,7 @@ class BaseTokenPooling(Module, ABC):
     config_keys: list[str] = ["tasks"]
     forward_kwargs: set[str] = {"task"}
 
-    def __init__(self, tasks: str | list[str] | None = None) -> None:
+    def __init__(self, *, tasks: str | list[str] | None = None) -> None:
         super().__init__()
         if isinstance(tasks, str):
             tasks = [tasks]
@@ -247,7 +247,7 @@ class HierarchicalTokenPooling(BaseTokenPooling):
     config_keys: list[str] = ["pool_factor", "num_protected_tokens", "tasks"]
 
     def __init__(
-        self, pool_factor: int = 1, num_protected_tokens: int = 1, tasks: str | list[str] | None = None
+        self, pool_factor: int = 1, *, num_protected_tokens: int = 1, tasks: str | list[str] | None = None
     ) -> None:
         super().__init__(tasks=tasks)
         if pool_factor < 1:
@@ -290,7 +290,7 @@ class LambdaTokenPooling(BaseTokenPooling):
         pooled = pooling.pool(document_embeddings)
     """
 
-    def __init__(self, pool_fn: Callable[[Tensor], Tensor], tasks: str | list[str] | None = None) -> None:
+    def __init__(self, pool_fn: Callable[[Tensor], Tensor], *, tasks: str | list[str] | None = None) -> None:
         super().__init__(tasks=tasks)
         self.pool_fn = pool_fn
 

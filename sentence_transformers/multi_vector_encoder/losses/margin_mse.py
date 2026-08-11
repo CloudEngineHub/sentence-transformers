@@ -73,6 +73,7 @@ class MultiVectorMarginMSELoss(nn.Module):
     def __init__(
         self,
         model: MultiVectorEncoder,
+        *,
         similarity_fct: Callable | None = None,
         mini_batch_size: int | None = None,
     ) -> None:

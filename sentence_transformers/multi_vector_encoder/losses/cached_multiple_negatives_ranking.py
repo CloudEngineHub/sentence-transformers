@@ -106,6 +106,7 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
     def __init__(
         self,
         model: MultiVectorEncoder,
+        *,
         scale: float = 1.0,
         similarity_fct: Callable | None = None,
         mini_batch_size: int = 32,

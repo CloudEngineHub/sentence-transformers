@@ -109,6 +109,7 @@ class MultiVectorInformationRetrievalEvaluator(InformationRetrievalEvaluator):
         queries: dict[str, SingleInput],
         corpus: dict[str, SingleInput],
         relevant_docs: dict[str, set[str]],
+        *,
         corpus_chunk_size: int = 5000,
         document_chunk_elements: int | None = None,
         score_functions: dict[str, Callable[[Tensor, Tensor], Tensor]] | None = None,

@@ -91,6 +91,7 @@ class MultiVectorDistillKLDivLoss(nn.Module):
     def __init__(
         self,
         model: MultiVectorEncoder,
+        *,
         similarity_fct: Callable | None = None,
         temperature: float = 1.0,
         student_temperature: float | None = None,

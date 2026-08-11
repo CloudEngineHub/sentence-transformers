@@ -95,6 +95,7 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
     def __init__(
         self,
         model: MultiVectorEncoder,
+        *,
         scale: float = 1.0,
         similarity_fct: Callable | None = None,
         mini_batch_size: int | None = None,
