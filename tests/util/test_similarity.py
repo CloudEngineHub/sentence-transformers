@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import sys
-
 import numpy as np
 import pytest
 import sklearn
@@ -24,6 +22,7 @@ from sentence_transformers.util.similarity import (
     pairwise_manhattan_sim,
     pytorch_cos_sim,
 )
+from tests.utils import skip_bfloat16_cpu_crash
 
 
 def test_pytorch_cos_sim() -> None:
@@ -584,10 +583,7 @@ def test_maxsim_element_budget_matches_single_chunk() -> None:
     assert torch.allclose(masked_single, padded_single, atol=1e-6)
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="bfloat16 CPU matmul can hard-crash (0xc000001d) on some Windows machines. Skipping to avoid CI failures.",
-)
+@skip_bfloat16_cpu_crash
 def test_maxsim_half_precision_accumulates_in_float32() -> None:
     """Summing the query-token maxima in bf16 collapses documents onto the coarse bf16 grid: the
     accumulation runs in float32 and the scores stay float32."""
@@ -611,10 +607,7 @@ def test_maxsim_half_precision_accumulates_in_float32() -> None:
     assert torch.allclose(chunked, scores, rtol=0, atol=0.05)
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="bfloat16 CPU matmul can hard-crash (0xc000001d) on some Windows machines. Skipping to avoid CI failures.",
-)
+@skip_bfloat16_cpu_crash
 def test_maxsim_pairwise_half_precision_accumulates_in_float32() -> None:
     """Both maxsim_pairwise paths (tensor and per-pair list) accumulate in float32."""
     generator = torch.Generator().manual_seed(19)

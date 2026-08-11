@@ -1537,8 +1537,8 @@ class MultiVectorEncoder(BaseModel):
         self._legacy.transformer_config.setdefault(
             "query_expansion", {"strategy": "fixed", "attend": attend, "length": length}
         )
-        # Stanford-NLP's ``--mask-punctuation`` CLI flag defaults to ``False`` (``store_true``). Follow that for missing keys.
-        self._legacy.skiplist_words = list(string.punctuation) if metadata.get("mask_punctuation", False) else []
+        # StanfordNLP's defaults mask_punctuation to True in its ColBERTConfig
+        self._legacy.skiplist_words = list(string.punctuation) if metadata.get("mask_punctuation", True) else []
 
     def _load_converted_modules(
         self,

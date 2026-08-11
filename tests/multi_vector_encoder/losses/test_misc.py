@@ -11,10 +11,15 @@ threads the resulting mask so MaxSim never scores against padded positions.
 
 from __future__ import annotations
 
+import math
+
 import pytest
 import torch
 from torch import Tensor, nn
 
+import sentence_transformers.multi_vector_encoder.losses.cached_multiple_negatives_ranking as cached_mnrl_module
+import sentence_transformers.multi_vector_encoder.losses.multiple_negatives_ranking as mnrl_module
+import sentence_transformers.util.distributed as distributed_module
 from sentence_transformers.base.losses.gradcache import _minibatch_ranges
 from sentence_transformers.base.losses.merged_forward import column_merging_disabled, merge_feature_batches
 from sentence_transformers.multi_vector_encoder import losses as mve_losses
@@ -500,6 +505,74 @@ def test_distill_kl_div_warns_once_when_the_teacher_collapses(caplog) -> None:
     with caplog.at_level("WARNING"):
         quiet(build_features(), labels)
     assert caplog.text == "", "a temperature matched to the spread must not warn"
+
+
+@pytest.mark.parametrize(
+    ("module", "build_loss"),
+    [
+        (
+            mnrl_module,
+            lambda **kwargs: mve_losses.MultiVectorMultipleNegativesRankingLoss(model=_PassthroughModel(), **kwargs),
+        ),
+        (
+            cached_mnrl_module,
+            lambda **kwargs: mve_losses.CachedMultiVectorMultipleNegativesRankingLoss(
+                model=_PassthroughModel(), mini_batch_size=2, show_progress_bar=False, **kwargs
+            ),
+        ),
+    ],
+    ids=["mnrl", "cached_mnrl"],
+)
+def test_mnr_loss_does_not_scale_with_world_size(monkeypatch, module, build_loss) -> None:
+    """A 2-rank gather returning ``[local; local]`` doubles every query's candidate pool with an exact
+    copy, which costs exactly ``log(2)`` of cross-entropy. The ``loss * get_world_size()`` multiplier
+    that ``8c4331ec`` removed would double the loss instead. The single-process gather guards above
+    cannot see that, because the multiplier is 1 at world size 1, so this reports world size 2 as
+    well as faking the gather."""
+
+    def build_features() -> list[dict[str, Tensor]]:
+        return [_make_feature(t_tokens=6 + 4 * way, batch=4, dim=8, seed=1 + way) for way in range(3)]
+
+    baseline = build_loss()(build_features(), labels=None).item()
+
+    def two_rank_gather(tensor: Tensor, mask: Tensor, with_grad: bool = False) -> tuple[Tensor, Tensor]:
+        return torch.cat([tensor, tensor]), torch.cat([mask, mask])
+
+    # get_world_size / get_rank read these from their own module globals at call time, so patching
+    # here reaches the losses whichever way they imported the helpers.
+    monkeypatch.setattr(distributed_module, "is_dist_initialized", lambda: True)
+    monkeypatch.setattr(distributed_module.dist, "get_world_size", lambda *args, **kwargs: 2)
+    monkeypatch.setattr(distributed_module.dist, "get_rank", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(module, "all_gather_padded", two_rank_gather)
+
+    gathered = build_loss(gather_across_devices=True)(build_features(), labels=None).item()
+    assert gathered == pytest.approx(baseline + math.log(2), abs=1e-5)
+
+
+def test_pairwise_scorers_match_the_diagonal_of_their_matrix_form() -> None:
+    """Both pairwise scorers are only covered by plumbing and naming assertions elsewhere. Their
+    contract is that ``fn(q, d)[i]`` equals the ``(i, i)`` entry the matrix form produces, so pin
+    that against the matrix scorers rather than against a hand-rolled reference."""
+    from sentence_transformers.multi_vector_encoder.scoring import (
+        colbert_scores,
+        colbert_scores_pairwise,
+        xtr_scores,
+        xtr_scores_pairwise,
+    )
+
+    generator = torch.Generator().manual_seed(6)
+    queries = torch.nn.functional.normalize(torch.randn(3, 4, 8, generator=generator), p=2, dim=-1)
+    documents = torch.nn.functional.normalize(torch.randn(3, 5, 8, generator=generator), p=2, dim=-1)
+
+    # The matrix forms take (Q, N, d_tokens, dim); N=1 makes column i document i.
+    grouped = documents.unsqueeze(1)
+    colbert_diagonal = colbert_scores(queries, grouped).diagonal()
+    assert torch.allclose(colbert_scores_pairwise(queries, documents), colbert_diagonal, atol=1e-5)
+
+    # XTR's top-k spans the whole in-batch pool, so it only agrees when nothing is left out.
+    xtr_diagonal = xtr_scores(queries, grouped, top_k=queries.shape[1] * documents.numel()).diagonal()
+    pairwise = xtr_scores_pairwise(queries, documents, top_k=queries.shape[1] * documents.numel())
+    assert torch.allclose(pairwise, xtr_diagonal, atol=1e-5)
 
 
 class _TokenizingModel(nn.Module):

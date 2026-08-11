@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import gc
-import sys
 import tempfile
 
 import numpy as np
@@ -18,6 +17,7 @@ from sentence_transformers.multi_vector_encoder.modules import (
 )
 from sentence_transformers.multi_vector_encoder.scoring import XTRScores, colbert_scores
 from sentence_transformers.util import SimilarityFunction, maxsim, maxsim_pairwise
+from tests.utils import skip_bfloat16_cpu_crash
 
 
 @pytest.fixture(scope="module")
@@ -356,6 +356,27 @@ def test_mask_skiplist_tasks_gate(model: MultiVectorEncoder) -> None:
     assert query_side.forward(dict(features), task="query")["attention_mask"].tolist() == [[True, False, True]]
 
 
+def test_mask_repads_flash_attention_flattened_features(model: MultiVectorEncoder) -> None:
+    """Under FA2 unpadding the encoder hands the mask a flat ``(1, sum_lens, ...)`` batch described by
+    ``cu_seq_lens_q`` and no ``attention_mask``. The mask re-pads it back to ``(B, T, D)`` before
+    applying the skiplist, and this branch is otherwise reachable only with real flash attention."""
+    mask = MultiVectorMask(skiplist_words=["."])
+    mask.resolve_with_tokenizer(model.tokenizer)
+    period_id = model.tokenizer.convert_tokens_to_ids(".")
+    # Two sequences of 3 and 2 tokens, flattened into one row. The period sits in each.
+    features = {
+        "input_ids": torch.tensor([[101, period_id, 102, 101, period_id]]),
+        "token_embeddings": torch.arange(5.0).reshape(1, 5, 1),
+        "cu_seq_lens_q": torch.tensor([0, 3, 5]),
+    }
+    out = mask.forward(features, task="document")
+
+    assert out["token_embeddings"].shape == (2, 3, 1), "re-padded to (B, T_max, D)"
+    assert "cu_seq_lens_q" not in out, "FA2 metadata is dropped once re-padded"
+    # Row 0 keeps its 3 real tokens minus the period, row 1 keeps 2 minus the period then pads.
+    assert out["attention_mask"].tolist() == [[True, False, True], [True, False, False]]
+
+
 def test_mask_skiplist_tasks_round_trips_through_config(tmp_path) -> None:
     # A bare string coerces to a one-element list, and the key persists.
     MultiVectorMask(skiplist_words=["."], skiplist_tasks="query").save(str(tmp_path))
@@ -427,9 +448,9 @@ def test_encode_document_default_skiplist_keeps_punctuation(model: MultiVectorEn
 
 def test_stanford_metadata_seeds_skiplist_from_mask_punctuation(monkeypatch, tmp_path) -> None:
     """A Stanford-NLP load seeds the skiplist from the ``mask_punctuation`` flag in ``artifact.metadata``.
-    The flag is a ``store_true`` CLI option (default off), so a missing or ``False`` value yields an empty
-    skiplist and only ``True`` restores punctuation. The slow pretrained tests only exercise the ``True``
-    case, so this fast unit test pins the default-off branch.
+    ColBERTConfig declares ``mask_punctuation: bool = DefaultVal(True)``, so a missing key means the
+    checkpoint was trained with punctuation masked and only an explicit ``False`` turns it off. The slow
+    pretrained tests only exercise the ``True`` case, so this fast unit test pins the other two.
     """
     import json
     import string
@@ -442,7 +463,7 @@ def test_stanford_metadata_seeds_skiplist_from_mask_punctuation(monkeypatch, tmp
     monkeypatch.setattr(Dense, "load_file_path", lambda *args, **kwargs: str(meta_file))
 
     for metadata, expected in (
-        ({}, []),  # no key: --mask-punctuation is store_true, so absent means off
+        ({}, list(string.punctuation)),  # absent: ColBERTConfig's own default is True
         ({"mask_punctuation": False}, []),
         ({"mask_punctuation": True}, list(string.punctuation)),
     ):
@@ -504,6 +525,82 @@ def test_parse_model_config_translates_pylate_expansion(model_config, expected_q
         assert knobs.get("query_expansion") == expected_qe
     # Null knobs must not pass through, or they would override the Transformer default with None.
     assert "query_length" not in knobs or knobs["query_length"] is not None
+
+
+def _write_stanford_checkpoint(
+    directory, model: MultiVectorEncoder, projection_dim: int = 16, metadata: dict | None = None
+) -> None:
+    """A Stanford-NLP ColBERT-shaped checkpoint: ``architectures: ["HF_ColBERT"]``, the projection
+    stored at the repo root as ``linear.weight`` rather than in a ``2_Dense/`` folder, and an
+    optional ``artifact.metadata``. Built from the tiny backbone so the archetype is exercised
+    without downloading a real ColBERT."""
+    import json
+
+    from safetensors.torch import load_file, save_file
+
+    # Re-save the session-scoped fixture's backbone rather than downloading a second copy.
+    model.transformers_model.save_pretrained(str(directory))
+    model.tokenizer.save_pretrained(str(directory))
+
+    config_path = directory / "config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["architectures"] = ["HF_ColBERT"]
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    weights = load_file(directory / "model.safetensors")
+    generator = torch.Generator().manual_seed(0)
+    weights["linear.weight"] = torch.randn(projection_dim, config["hidden_size"], generator=generator)
+    save_file(weights, str(directory / "model.safetensors"))
+
+    if metadata is not None:
+        (directory / "artifact.metadata").write_text(json.dumps(metadata), encoding="utf-8")
+
+
+def test_loads_stanford_colbert_archetype(tmp_path, model: MultiVectorEncoder) -> None:
+    """The Stanford load path has no non-slow coverage, and ``audit_v2.md`` recorded a misload of
+    exactly this archetype as a blocker. Pins that the root ``linear.weight`` becomes the Dense head
+    (rather than a fresh random projection) and that artifact.metadata drives the knobs."""
+    from safetensors.torch import load_file
+
+    _write_stanford_checkpoint(
+        tmp_path,
+        model,
+        metadata={"query_maxlen": 8, "doc_maxlen": 96, "mask_punctuation": True, "attend_to_mask_tokens": False},
+    )
+    model = MultiVectorEncoder(str(tmp_path))
+
+    assert [type(module).__name__ for module in model] == ["Transformer", "Dense", "MultiVectorMask", "Normalize"]
+    # The head must carry the checkpoint's weight, not a fresh initialisation.
+    expected = load_file(tmp_path / "model.safetensors")["linear.weight"]
+    assert model.get_embedding_dimension() == expected.shape[0]
+    assert torch.allclose(model[1].linear.weight.cpu(), expected)
+
+    assert model[0].document_length == 96
+    assert model[0].query_expansion["length"] == 8 and model[0].query_expansion["attend"] is False
+    assert model.prompts == {"query": "[unused0] ", "document": "[unused1] "}
+    mask = next(module for module in model if isinstance(module, MultiVectorMask))
+    assert mask._skiplist_ids is not None, "mask_punctuation=True must reach the resolved skiplist"
+
+
+def test_stanford_colbert_archetype_without_metadata_uses_defaults(
+    tmp_path, model: MultiVectorEncoder, caplog
+) -> None:
+    """``artifact.metadata`` is absent from some Stanford-shaped repos, so the loader falls back to
+    the canonical markers and a 32-token query expansion instead of failing."""
+    import string
+
+    _write_stanford_checkpoint(tmp_path, model, metadata=None)
+    with caplog.at_level("WARNING"):
+        model = MultiVectorEncoder(str(tmp_path))
+
+    assert "No artifact.metadata file found" in caplog.text
+    assert model.prompts == {"query": "[unused0] ", "document": "[unused1] "}
+    assert model[0].query_expansion["length"] == 32
+    mask = next(module for module in model if isinstance(module, MultiVectorMask))
+    # ColBERTConfig defaults mask_punctuation to True, so a metadata-less checkpoint was trained with
+    # punctuation masked and must keep that on load.
+    assert mask.skiplist_words == list(string.punctuation)
+    assert mask._skiplist_ids is not None
 
 
 @pytest.mark.parametrize(
@@ -740,6 +837,9 @@ def test_pylate_marked_conversion_defaults_punctuation_skiplist(tmp_path) -> Non
     model = MultiVectorEncoder(str(tmp_path))
     mask = next(module for module in model if isinstance(module, MultiVectorMask))
     assert mask.skiplist_words == list(string.punctuation)
+    # Resolved by the on_model_ready hook, which fires after _apply_legacy_fixups appends this mask.
+    # Without it the words never become ids and the skiplist silently does nothing.
+    assert mask._skiplist_ids is not None and len(mask._skiplist_ids) > 0
     # The prefixes are promoted into prompts (the SentenceTransformer-format branch keeps parsing
     # the source config, unlike conversions from other model types).
     assert model.prompts.get("query") == "[Q] "
@@ -772,32 +872,38 @@ def test_xtr_scores_keeps_retrieved_negative_similarities() -> None:
         assert torch.allclose(scores, torch.tensor([[0.5, -0.3]]), atol=1e-6), f"top_k={top_k}"
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="bfloat16 CPU matmul can hard-crash (0xc000001d) on some Windows machines. Skipping to avoid CI failures.",
-)
+def test_colbert_kd_scores_are_the_block_diagonal_of_the_matrix() -> None:
+    """KD scores are each query's own document group, the query-major block diagonal of the full
+    matrix. Split out of the bfloat16 test below so it keeps running on Windows, where that one is
+    skipped: this relation has nothing to do with the input dtype."""
+    from sentence_transformers.multi_vector_encoder.scoring import colbert_kd_scores, colbert_scores
+
+    torch.manual_seed(0)
+    queries = torch.nn.functional.normalize(torch.randn(2, 5, 16), dim=-1)
+    documents = torch.nn.functional.normalize(torch.randn(2, 3, 7, 16), dim=-1)
+
+    scores = colbert_scores(queries, documents)
+    kd_scores = colbert_kd_scores(queries, documents)
+    assert scores.shape == (2, 6) and kd_scores.shape == (2, 3)
+    assert torch.allclose(kd_scores[0], scores[0, 0:3])
+    assert torch.allclose(kd_scores[1], scores[1, 3:6])
+
+
+@skip_bfloat16_cpu_crash
 def test_colbert_scores_keep_float32_through_delegation() -> None:
     """The losses' default similarity_fct surface must keep maxsim's float32 scores, also under a
-    future fused reimplementation. Also pins the KD block-diagonal relation to the full matrix."""
+    future fused reimplementation."""
     from sentence_transformers.multi_vector_encoder.scoring import colbert_kd_scores, colbert_scores
 
     torch.manual_seed(0)
     queries = torch.nn.functional.normalize(torch.randn(2, 5, 16), dim=-1).bfloat16()
     documents = torch.nn.functional.normalize(torch.randn(2, 3, 7, 16), dim=-1).bfloat16()
 
-    scores = colbert_scores(queries, documents)
-    kd_scores = colbert_kd_scores(queries, documents)
-    assert scores.dtype == torch.float32 and scores.shape == (2, 6)
-    assert kd_scores.dtype == torch.float32 and kd_scores.shape == (2, 3)
-    # KD scores are each query's own document group, the query-major block diagonal of the matrix.
-    assert torch.allclose(kd_scores[0], scores[0, 0:3])
-    assert torch.allclose(kd_scores[1], scores[1, 3:6])
+    assert colbert_scores(queries, documents).dtype == torch.float32
+    assert colbert_kd_scores(queries, documents).dtype == torch.float32
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="bfloat16 CPU matmul can hard-crash (0xc000001d) on some Windows machines. Skipping to avoid CI failures.",
-)
+@skip_bfloat16_cpu_crash
 def test_xtr_scores_half_precision_accumulates_in_float32() -> None:
     """XTR's own query-token sum accumulates in float32: an output cast alone cannot restore the
     resolution a bf16 sum loses."""
