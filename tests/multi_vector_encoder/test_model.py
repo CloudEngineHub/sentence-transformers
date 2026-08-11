@@ -531,19 +531,14 @@ def test_loads_native_retriever_archetype() -> None:
     """transformers-native late-interaction retrievers (``architectures`` ending in ``ForRetrieval``,
     i.e. ColPali / ColQwen2 / ColModernVBert) take a different branch: ``forward`` already projects and
     L2-normalises, so only the scoring mask is appended and no Dense or Normalize. Pinned on a
-    tiny-random ColPali so the archetype runs in CI instead of needing a 3B download."""
-    from PIL import Image
-
+    tiny-random ColPali so the archetype runs in CI instead of needing a 3B download. Loading only:
+    this checkpoint ships a bare PaliGemmaProcessor rather than a ColPaliProcessor, so it rejects
+    text and has no visual prompt prefix to encode images with."""
     model = MultiVectorEncoder("hf-internal-testing/tiny-random-ColPaliForRetrieval")
 
     assert [type(module).__name__ for module in model] == ["Transformer", "MultiVectorMask"]
     assert model[0].transformer_task == "retrieval"
     assert set(model.modalities) == {"text", "image"}
-
-    embeddings = model.encode_document([Image.new("RGB", (32, 32), "red")], convert_to_tensor=True)[0].cpu()
-    assert embeddings.ndim == 2 and embeddings.shape[1] == model.get_embedding_dimension()
-    # The head normalises, which is why no Normalize module is appended.
-    assert torch.allclose(embeddings.norm(dim=-1), torch.ones(embeddings.shape[0]), atol=1e-4)
 
 
 def _write_stanford_checkpoint(
