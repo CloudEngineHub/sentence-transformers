@@ -35,8 +35,9 @@ class SpladePooling(Module):
 
         embedding_dimension (int, optional): Dimensionality of the output embeddings (if needed).
         chunk_size (int, optional): Chunk size along the sequence length dimension (i.e., number of tokens per chunk).
-            If None, processes entire sequence at once. Using smaller chunks the reduces memory usage but may
-            lower the training and inference speed. Default is None.
+            If None, processes entire sequence at once. Using smaller chunks reduces memory usage but may
+            lower the training and inference speed. Only applies to padded inputs: unpadded (flattened) inputs
+            already pool one sequence at a time. Default is None.
     """
 
     SPLADE_POOLING_MODES = ("sum", "max")
@@ -90,13 +91,11 @@ class SpladePooling(Module):
         batch_size, seq_len, vocab_s = mlm_logits.shape
         device = mlm_logits.device
 
-        # Initialize pooled scores based on pooling strategy
+        # Initialize pooled scores based on pooling strategy, validated in __init__ like the flattened path does.
         if self.pooling_strategy == "max":
             pooled_scores = torch.full((batch_size, vocab_s), float("-inf"), dtype=mlm_logits.dtype, device=device)
-        elif self.pooling_strategy == "sum":
-            pooled_scores = torch.zeros((batch_size, vocab_s), dtype=mlm_logits.dtype, device=device)
         else:
-            raise ValueError(f"Unsupported pooling_strategy: {self.pooling_strategy}")
+            pooled_scores = torch.zeros((batch_size, vocab_s), dtype=mlm_logits.dtype, device=device)
 
         # Process in chunks if chunk_size is set, otherwise process the entire sequence at once
         chunk_size = seq_len if (self.chunk_size is None or self.chunk_size <= 0) else self.chunk_size
