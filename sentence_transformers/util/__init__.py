@@ -17,6 +17,7 @@ from .logging import LoggingHandler, install_logger
 from .misc import (
     ORIGINAL_TRANSFORMER_MODELS,
     append_to_last_row,
+    check_teacher_targets,
     disable_datasets_caching,
     disable_logging,
     fullname,
@@ -90,6 +91,7 @@ __all__ = [
     # From misc.py
     "fullname",
     "similarity_fct_name",
+    "check_teacher_targets",
     "import_from_string",
     "import_module_class",
     "disable_datasets_caching",

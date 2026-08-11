@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import math
 import os
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
@@ -148,13 +149,10 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
         self.temperature = temperature
         self.student_temperature = student_temperature if student_temperature is not None else temperature
         self.teacher_temperature = teacher_temperature if teacher_temperature is not None else temperature
-        for label, value in (
-            ("temperature", self.temperature),
-            ("student_temperature", self.student_temperature),
-            ("teacher_temperature", self.teacher_temperature),
-        ):
-            if value <= 0:
-                raise ValueError(f"{label} must be > 0, got {value}.")
+        for label in ("temperature", "student_temperature", "teacher_temperature"):
+            value = getattr(self, label)
+            if not 0 < value < math.inf:
+                raise ValueError(f"{label} must be a positive finite number, got {value}.")
         self.similarity_fct = similarity_fct
         self.name = name
         self.batch_size = batch_size

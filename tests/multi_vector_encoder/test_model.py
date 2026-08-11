@@ -757,6 +757,21 @@ def test_xtr_scores_clamps_topk_to_token_pool() -> None:
     assert torch.isfinite(scores).all()
 
 
+def test_xtr_scores_keeps_retrieved_negative_similarities() -> None:
+    """Non-retrieved tokens are held at the dtype minimum, not 0: a zero placeholder wins the
+    per-document max over a genuinely retrieved negative similarity and discards it. Here document 1
+    retrieves -0.3 and must keep it at every top_k, not report 0.0."""
+    from sentence_transformers.multi_vector_encoder.scoring import xtr_scores
+
+    queries = torch.tensor([[[1.0, 0.0]]])
+    documents = torch.tensor([[[[0.5, 0.0], [-0.9, 0.0]], [[-0.3, 0.0], [-0.8, 0.0]]]])
+    documents_mask = torch.ones(1, 2, 2, dtype=torch.bool)
+
+    for top_k in (2, 3, 4):
+        scores = xtr_scores(queries, documents, documents_mask=documents_mask, top_k=top_k)
+        assert torch.allclose(scores, torch.tensor([[0.5, -0.3]]), atol=1e-6), f"top_k={top_k}"
+
+
 @pytest.mark.skipif(
     sys.platform == "win32",
     reason="bfloat16 CPU matmul can hard-crash (0xc000001d) on some Windows machines. Skipping to avoid CI failures.",

@@ -9,6 +9,12 @@ import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
 from inspect import isclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from torch import Tensor
+
+logger = logging.getLogger(__name__)
 
 
 def fullname(obj) -> str:
@@ -53,6 +59,49 @@ def similarity_fct_name(similarity_fct: Callable) -> str:
         args = ", ".join(f"{key}={value!r}" for key, value in metric_config().items())
         return f"{name}({args})"
     return name
+
+
+def check_teacher_targets(
+    teacher_probabilities: Tensor, teacher_logits: Tensor, teacher_temperature: float, loss_name: str
+) -> None:
+    """Inspect a distillation loss's teacher target once, on its first forward.
+
+    Takes the target the loss itself computed rather than recomputing a softmax, so the two can
+    never disagree. Reading either result off an accelerator costs a device synchronization, hence
+    the once-per-loss contract. That also means only the first batch a loss sees is inspected: with
+    one loss shared across a ``DatasetDict`` whose splits carry differently scaled teacher scores,
+    the splits drawn later go unexamined.
+
+    Args:
+        teacher_probabilities: The softmaxed teacher target the loss will use.
+        teacher_logits: The raw teacher scores, used to report their spread.
+        teacher_temperature: The temperature already applied to ``teacher_logits``.
+        loss_name: Loss class name, to open the message with.
+
+    Raises:
+        ValueError: If the teacher scores contain NaN, which would make the loss and every gradient
+            NaN on the first backward.
+    """
+    scores = teacher_logits.detach().float()
+    if scores.isnan().any():
+        raise ValueError(
+            f"{loss_name}: the teacher scores contain NaN, so the loss and every gradient would be "
+            "NaN after the first backward. Check the column holding your teacher scores."
+        )
+    if scores.isinf().any():
+        # An infinite score marks a candidate the caller excluded on purpose.
+        return
+    collapsed = int((teacher_probabilities == 0).sum())
+    if not collapsed:
+        return
+    spread = (scores.max(dim=-1).values - scores.min(dim=-1).values).max().item()
+    logger.warning(
+        f"{loss_name}: teacher_temperature={teacher_temperature} underflows {collapsed} of "
+        f"{teacher_probabilities.numel()} teacher scores to exactly zero, so those candidates carry "
+        f"no gradient. The widest candidate row spans {spread:.1f}, and a float32 softmax underflows "
+        f"once a row's spread divided by the temperature exceeds about 100. Raise "
+        f"teacher_temperature above {spread / 100:.3g}."
+    )
 
 
 def import_from_string(dotted_path: str) -> type:

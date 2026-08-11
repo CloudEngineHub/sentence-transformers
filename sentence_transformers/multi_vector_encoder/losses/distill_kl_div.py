@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterable
 from typing import Any
 
@@ -9,15 +10,19 @@ from torch import Tensor, nn
 from sentence_transformers.base.losses.merged_forward import embed_columns_padded
 from sentence_transformers.multi_vector_encoder.model import MultiVectorEncoder
 from sentence_transformers.multi_vector_encoder.scoring import colbert_kd_scores
-from sentence_transformers.util import similarity_fct_name, stack_padded_token_embeddings
+from sentence_transformers.util import (
+    check_teacher_targets,
+    similarity_fct_name,
+    stack_padded_token_embeddings,
+)
 
 
 class MultiVectorDistillKLDivLoss(nn.Module):
     """KL-divergence distillation loss for :class:`~sentence_transformers.MultiVectorEncoder` models.
 
-    For each query, the dataset provides ``N`` candidate documents (a positive plus optional negatives) and
-    teacher scores ``(N,)``. This loss computes the model's MaxSim scores against the same documents and
-    minimises the KL divergence between the softmaxed teacher and student distributions.
+    For each query, the dataset provides ``N`` candidate documents (a positive plus at least one negative)
+    and teacher scores ``(N,)``. This loss computes the model's MaxSim scores against the same documents
+    and minimises the KL divergence between the softmaxed teacher and student distributions.
 
     The expected input format, matching the standard multi-column convention:
 
@@ -35,16 +40,19 @@ class MultiVectorDistillKLDivLoss(nn.Module):
             :class:`~sentence_transformers.multi_vector_encoder.scoring.XTRKDScores` for XTR-style scoring.
         temperature: Temperature applied to both the student and teacher logits before softmax,
             unless overridden per side. Defaults to ``1.0``. The loss is multiplied by the student
-            temperature squared to keep the gradient magnitude comparable across temperatures
-            (Hinton et al., 2015). A sharp student temperature therefore shrinks the reported loss
-            strongly (by 1e-6 at ``0.001``): when weighing this loss against another, scale the KD
-            weight back up accordingly.
-        student_temperature: Student-side override of ``temperature``. Distillation recipes pair a
-            sharp student temperature with a softer teacher one, e.g. ``0.001`` and ``0.1`` with
-            MeanMaxSim scoring (``functools.partial(colbert_kd_scores, length_normalize=True)``).
-            Defaults to None.
-        teacher_temperature: Teacher-side override of ``temperature``. Tune it to the teacher's
-            score scale. Defaults to None.
+            temperature squared, which keeps the gradient magnitude comparable across temperatures
+            (Hinton et al., 2015) in the regime that paper covers, a shared temperature at or above
+            ``1.0``. Below that the gradient falls off instead, and a sharp student temperature
+            shrinks the reported loss strongly (by 1e-6 at ``0.001``), so scale the KD weight back
+            up when weighing this loss against another.
+        student_temperature: Student-side override of ``temperature``. Sharpening it far below the
+            spread of the student's own scores collapses that distribution to one-hot, and once the
+            teacher's is one-hot too the loss and its gradient are exactly zero. Defaults to None.
+        teacher_temperature: Teacher-side override of ``temperature``. Match it to the spread of your
+            teacher's scores rather than to a fixed value: a float32 softmax underflows to exact
+            zeros once a row's spread divided by the temperature exceeds about 100, and every
+            candidate that underflows drops out of the KL entirely, which is the ranking information
+            distillation exists to transfer. Defaults to None.
         mini_batch_size: Maximum number of rows per model forward. The merged
             ``batch_size * n_ways`` document batch is split into row chunks, each re-trimmed to its
             own longest document, so a single long outlier document only widens its own chunk.
@@ -69,7 +77,7 @@ class MultiVectorDistillKLDivLoss(nn.Module):
                     "label": [[9.5, 2.1], [8.8, 1.4]],
                 }
             )
-            # Sharpen both distributions with a temperature below 1.0 when scoring many candidates.
+            # Consider sharpening both distributions with a temperature below 1.0 when scoring many candidates.
             loss = MultiVectorDistillKLDivLoss(model, temperature=0.25)
 
             trainer = MultiVectorEncoderTrainer(model=model, train_dataset=train_dataset, loss=loss)
@@ -95,8 +103,13 @@ class MultiVectorDistillKLDivLoss(nn.Module):
         self.temperature = temperature
         self.student_temperature = student_temperature if student_temperature is not None else temperature
         self.teacher_temperature = teacher_temperature if teacher_temperature is not None else temperature
+        for label in ("temperature", "student_temperature", "teacher_temperature"):
+            value = getattr(self, label)
+            if not 0 < value < math.inf:
+                raise ValueError(f"{label} must be a positive finite number, got {value}.")
         self.mini_batch_size = mini_batch_size
         self.loss_function = nn.KLDivLoss(reduction="batchmean", log_target=True)
+        self._checked_teacher_scale = False
 
     def get_config_dict(self) -> dict[str, Any]:
         config: dict[str, Any] = {
@@ -116,10 +129,12 @@ class MultiVectorDistillKLDivLoss(nn.Module):
         labels: Tensor,
     ) -> Tensor:
         sentence_features = list(sentence_features)
-        if len(sentence_features) < 2:
+        if len(sentence_features) < 3:
             raise ValueError(
-                f"{type(self).__name__} expects at least 2 sentence features "
-                f"(query, document_1, ..., document_N), but got {len(sentence_features)}."
+                f"{type(self).__name__} expects at least 3 sentence features "
+                f"(query, document_1, ..., document_N with N >= 2), but got {len(sentence_features)}. "
+                "A softmax over one document is constant, so the loss and its gradient would be "
+                "identically zero. Add at least a second candidate document column."
             )
 
         # Collator-stamped tasks (positional fallback), masks from the model output where
@@ -152,6 +167,9 @@ class MultiVectorDistillKLDivLoss(nn.Module):
 
         student_log_probs = F.log_softmax(scores / self.student_temperature, dim=-1)
         teacher_log_probs = F.log_softmax(labels / self.teacher_temperature, dim=-1)
+        if not self._checked_teacher_scale:
+            self._checked_teacher_scale = True
+            check_teacher_targets(teacher_log_probs.exp(), labels, self.teacher_temperature, type(self).__name__)
         loss = self.loss_function(student_log_probs, teacher_log_probs)
         return loss * (self.student_temperature**2)
 

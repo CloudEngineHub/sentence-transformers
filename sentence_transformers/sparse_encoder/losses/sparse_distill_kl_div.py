@@ -32,11 +32,12 @@ class SparseDistillKLDivLoss(DistillKLDivLoss):
             temperature: Temperature parameter to soften probability distributions (higher temperature = softer distributions)
                 When combined with other losses, a temperature of 1.0 is also viable, but a higher temperature (e.g., 2.0 or 4.0)
                 can help prevent the student model from going to zero active dimensions. Defaults to 2.0.
-            student_temperature: Student-side override of ``temperature``. Distillation recipes often
-                pair a sharp student temperature with a softer teacher one. The loss is scaled by the
-                student temperature squared. Defaults to None.
-            teacher_temperature: Teacher-side override of ``temperature``. Tune it to the teacher's score
-                scale. Defaults to None.
+            student_temperature: Student-side override of ``temperature``, see
+                :class:`~sentence_transformers.losses.DistillKLDivLoss` for the regime where the
+                temperature-squared scaling holds. Defaults to None.
+            teacher_temperature: Teacher-side override of ``temperature``. Match it to the spread of
+                your teacher's scores: dividing by a temperature well below that spread collapses the
+                target to one-hot and destroys the ranking information being distilled. Defaults to None.
 
         References:
             - For more details, please refer to https://huggingface.co/papers/2010.11386

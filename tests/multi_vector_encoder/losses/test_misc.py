@@ -450,15 +450,56 @@ def test_cached_mnr_gather_across_devices_single_process(varlen_features) -> Non
 
 def test_distill_kl_div_validates_input_columns_and_label_shape() -> None:
     """Too few input columns, or teacher scores whose width does not match the number of document
-    columns, must fail loud instead of producing an opaque shape error."""
+    columns, must fail loud instead of producing an opaque shape error. A single document column is
+    rejected too: a softmax over one candidate is constant, so it would train nothing at a perfect
+    reported loss."""
     loss = mve_losses.MultiVectorDistillKLDivLoss(model=_PassthroughModel())
     queries = _make_feature(t_tokens=4, batch=3, dim=8, seed=1)
-    with pytest.raises(ValueError, match="at least 2 sentence features"):
+    with pytest.raises(ValueError, match="at least 3 sentence features"):
         loss([queries], torch.randn(3, 2))
+
+    one_document = _make_feature(t_tokens=6, batch=3, dim=8, seed=2)
+    with pytest.raises(ValueError, match="at least 3 sentence features"):
+        loss([queries, one_document], torch.randn(3, 1))
 
     documents = [_make_feature(t_tokens=6, batch=3, dim=8, seed=2 + way) for way in range(2)]
     with pytest.raises(ValueError, match="teacher scores"):
         loss([queries, *documents], torch.randn(3, 3))
+
+
+@pytest.mark.parametrize("bad", [0.0, -1.0, float("nan"), float("inf"), False])
+def test_distill_kl_div_rejects_unusable_temperatures(bad: float) -> None:
+    """A non-positive temperature silently inverts the objective and NaN poisons every weight on the
+    first backward, so both are rejected at construction like the evaluator already does."""
+    for kwargs in ({"temperature": bad}, {"student_temperature": bad}, {"teacher_temperature": bad}):
+        with pytest.raises(ValueError, match="must be a positive finite number"):
+            mve_losses.MultiVectorDistillKLDivLoss(model=_PassthroughModel(), **kwargs)
+
+
+def test_distill_kl_div_warns_once_when_the_teacher_collapses(caplog) -> None:
+    """This loss works in log space, so it hands the check ``teacher_log_probs.exp()``, which is the
+    target ``KLDivLoss(log_target=True)`` consumes rather than a separately computed softmax."""
+
+    def build_features() -> list[dict[str, Tensor]]:
+        # Rebuilt per call: the loss forward rewrites the attention masks of its features.
+        return [_make_feature(t_tokens=4 + way, batch=2, dim=8, seed=1 + way) for way in range(3)]
+
+    labels = torch.tensor([[8.5, -10.0], [7.0, -12.0]])
+    loss = mve_losses.MultiVectorDistillKLDivLoss(model=_PassthroughModel(), teacher_temperature=0.1)
+    with caplog.at_level("WARNING"):
+        loss(build_features(), labels)
+    assert "teacher_temperature=0.1" in caplog.text
+    assert "carry no gradient" in caplog.text
+
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        loss(build_features(), labels)
+    assert caplog.text == "", "the check is latched to the first forward"
+
+    quiet = mve_losses.MultiVectorDistillKLDivLoss(model=_PassthroughModel())
+    with caplog.at_level("WARNING"):
+        quiet(build_features(), labels)
+    assert caplog.text == "", "a temperature matched to the spread must not warn"
 
 
 class _TokenizingModel(nn.Module):

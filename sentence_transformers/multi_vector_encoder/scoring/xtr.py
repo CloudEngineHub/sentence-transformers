@@ -88,7 +88,9 @@ def xtr_scores(
 
     clubbed = scores.flatten(2, 3)
     top_values, indices = clubbed.topk(min(top_k, clubbed.shape[-1]), dim=-1, sorted=False)
-    masked = torch.zeros_like(clubbed).scatter_(-1, indices, top_values)
+    # Non-retrieved tokens sit at the dtype minimum, not 0: a zero placeholder wins the per-document
+    # max over a genuinely retrieved negative similarity and silently discards it.
+    masked = torch.full_like(clubbed, torch.finfo(clubbed.dtype).min).scatter_(-1, indices, top_values)
     # Paper-exact Z (Lee et al. 2023, eq. 5): the count of query tokens that retrieved at least one
     # real token of the document. PyLate / PrimeQA count positive per-token maxima with a 1e-3 clamp
     # instead, which amplifies all-negative rows over 1000x and diverges once top_k spans the token pool.
@@ -98,6 +100,8 @@ def xtr_scores(
     # fp32 accumulation like maxsim: summing per-token maxima in half precision collapses the
     # score grid (PyLate instead sums in the input dtype and casts the result).
     topk_scores_max = masked.view(Qb, Qt, Db, Dt).max(dim=-1).values.float()
+    # XTR imputes a missing similarity as 0, which is what a document with no retrieved token gets.
+    topk_scores_max = topk_scores_max.masked_fill(~alpha, 0.0)
 
     if queries_mask is not None:
         topk_scores_max = topk_scores_max * queries_mask.unsqueeze(-1)
@@ -106,8 +110,8 @@ def xtr_scores(
     scores_sum = topk_scores_max.sum(dim=1)
     Z = alpha.float().sum(dim=1).clamp_(min=1)
     scores = scores_sum / Z
-    # Every token of a fully masked document sits at the dtype minimum: the sum overflows to -inf
-    # when top_k spans all tokens, and the scatter flattens it to a retrievable-looking 0 below that.
+    # A fully masked document retrieves nothing, so the imputation above scores it 0 and it would rank
+    # among the real documents. The sentinel puts it below every one of them.
     return _fill_empty_document_scores(scores, ~docs_mask_flat.bool().any(dim=-1))
 
 
