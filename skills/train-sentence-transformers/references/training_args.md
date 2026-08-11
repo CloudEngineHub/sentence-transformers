@@ -206,7 +206,8 @@ For trackio sweeps / ablations, use `trackio.init(project="...", name="...", gro
 gradient_checkpointing=True,    # trades compute for memory. ~30% slowdown, ~40% less memory.
 gradient_checkpointing_kwargs={"use_reentrant": False},
 torch_empty_cache_steps=1000,   # periodically clear PyTorch allocator cache
-dataloader_num_workers=2,       # parallel data loading; 2-4 is usually enough
+dataloader_num_workers=2,       # parallel data loading, past 2 adds startup cost but no throughput
+dataloader_persistent_workers=True,  # recommended on Windows/macOS, can be False on Linux
 dataloader_pin_memory=True,
 ```
 

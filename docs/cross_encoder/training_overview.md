@@ -438,6 +438,7 @@ The :class:`~sentence_transformers.cross_encoder.training_args.CrossEncoderTrain
         <a href="https://huggingface.co/docs/transformers/main/en/main_classes/trainer#transformers.TrainingArguments.eval_accumulation_steps"><code>eval_accumulation_steps</code></a>
         <a href="https://huggingface.co/docs/transformers/main/en/main_classes/trainer#transformers.TrainingArguments.optim"><code>optim</code></a>
         <a href="https://huggingface.co/docs/transformers/main/en/main_classes/trainer#transformers.TrainingArguments.dataloader_num_workers"><code>dataloader_num_workers</code></a>
+        <a href="https://huggingface.co/docs/transformers/main/en/main_classes/trainer#transformers.TrainingArguments.dataloader_persistent_workers"><code>dataloader_persistent_workers</code></a>
         <a href="https://huggingface.co/docs/transformers/main/en/main_classes/trainer#transformers.TrainingArguments.dataloader_prefetch_factor"><code>dataloader_prefetch_factor</code></a>
         <a href="../package_reference/cross_encoder/training_args.html#sentence_transformers.cross_encoder.training_args.CrossEncoderTrainingArguments"><code>batch_sampler</code></a>
         <a href="../package_reference/cross_encoder/training_args.html#sentence_transformers.cross_encoder.training_args.CrossEncoderTrainingArguments"><code>multi_dataset_batch_sampler</code></a>
@@ -1030,7 +1031,8 @@ The :class:`~sentence_transformers.cross_encoder.trainer.CrossEncoderTrainer` is
                 warmup_steps=0.1,
                 fp16=False,  # Set to False if you get an error that your GPU can't run on FP16
                 bf16=True,  # Set to True if you have a GPU that supports BF16
-                dataloader_num_workers=4,
+                dataloader_num_workers=2,
+                dataloader_persistent_workers=True,  # Recommended on Windows/macOS, can be False on Linux
                 load_best_model_at_end=True,
                 metric_for_best_model="eval_gooaq-dev_ndcg@10",
                 # Optional tracking/debugging parameters:
