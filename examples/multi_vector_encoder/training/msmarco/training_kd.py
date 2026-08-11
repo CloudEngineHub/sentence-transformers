@@ -9,7 +9,8 @@ resolves those IDs against the queries / documents datasets on the fly during tr
 As loss function, we use MultiVectorDistillKLDivLoss, which minimizes the KL divergence between the
 (softmaxed) teacher scores and the student's MaxSim scores over each query's candidate documents. The
 dataset's teacher scores are min-max normalized per query, which makes the default softmax nearly flat over
-32 candidates, so we sharpen both distributions with temperature=0.25.
+32 candidates, so we sharpen with temperature=0.25. It applies to both sides, and measured better here than
+the default of 1.0.
 
 The model is built explicitly in the classic ColBERT configuration: a retrieval-pretrained backbone
 (Alibaba-NLP/gte-modernbert-base), queries mask-expanded to at least 32 tokens (the "min" strategy: short
