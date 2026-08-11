@@ -186,7 +186,7 @@ class MultipleNegativesRankingLoss(nn.Module):
         super().__init__()
         self.model = model
         self.scale = scale
-        if scale <= 0:
+        if not scale > 0:
             raise ValueError("Scale must be a positive value.")
         self.similarity_fct = similarity_fct
         self.gather_across_devices = gather_across_devices

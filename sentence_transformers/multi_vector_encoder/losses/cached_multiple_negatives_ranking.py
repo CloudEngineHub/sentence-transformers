@@ -117,7 +117,7 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
     ) -> None:
         super().__init__()
         _validate_mini_batch_num_tokens(mini_batch_num_tokens)
-        if scale <= 0:
+        if not scale > 0:
             raise ValueError("Scale must be a positive value.")
         self.model = model
         self.scale = scale
