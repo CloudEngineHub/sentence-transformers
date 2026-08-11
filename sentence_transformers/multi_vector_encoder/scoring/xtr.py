@@ -88,9 +88,9 @@ def xtr_scores(
 
     clubbed = scores.flatten(2, 3)
     top_values, indices = clubbed.topk(min(top_k, clubbed.shape[-1]), dim=-1, sorted=False)
-    # Non-retrieved tokens sit at the dtype minimum, not 0: a zero placeholder wins the per-document
-    # max over a genuinely retrieved negative similarity and silently discards it.
-    masked = torch.full_like(clubbed, torch.finfo(clubbed.dtype).min).scatter_(-1, indices, top_values)
+    # Non-retrieved tokens sit at the dtype minimum, or a 0 placeholder wins the per-document max over
+    # a genuinely retrieved negative. Filled in place: clubbed views scores, which is dead from here.
+    masked = clubbed.fill_(torch.finfo(clubbed.dtype).min).scatter_(-1, indices, top_values)
     # Paper-exact Z (Lee et al. 2023, eq. 5): the count of query tokens that retrieved at least one
     # real token of the document. PyLate / PrimeQA count positive per-token maxima with a 1e-3 clamp
     # instead, which amplifies all-negative rows over 1000x and diverges once top_k spans the token pool.
