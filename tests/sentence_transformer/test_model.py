@@ -706,7 +706,7 @@ def test_encode_truncate(
 # MaxSim is for multi-vector (3D) embeddings. SentenceTransformer is single-vector so it's not applicable.
 @pytest.mark.parametrize(
     "similarity_fn_name",
-    [v for v in SimilarityFunction.possible_values() if v != SimilarityFunction.MAXSIM.value],
+    [v for v in SimilarityFunction.possible_values() if v in SentenceTransformer.SUPPORTED_SIMILARITY_FN_NAMES],
 )
 def test_similarity_score(stsb_bert_tiny_model: SentenceTransformer, similarity_fn_name: str) -> None:
     model = stsb_bert_tiny_model

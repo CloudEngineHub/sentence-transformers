@@ -787,3 +787,28 @@ def test_distill_kl_div_separate_temperatures() -> None:
         "teacher_temperature": 2.0,
         "mini_batch_size": None,
     }
+
+
+def test_mean_colbert_scores_divide_by_query_tokens() -> None:
+    """The mean_colbert_* callables are the length-normalized form of their colbert_* counterparts,
+    so a loss can name MeanMaxSim scoring instead of binding a functools.partial."""
+    from sentence_transformers.multi_vector_encoder.scoring import (
+        colbert_kd_scores,
+        colbert_scores,
+        colbert_scores_pairwise,
+        mean_colbert_kd_scores,
+        mean_colbert_scores,
+        mean_colbert_scores_pairwise,
+    )
+
+    generator = torch.Generator().manual_seed(4)
+    queries = torch.nn.functional.normalize(torch.randn(2, 4, 8, generator=generator), dim=-1)
+    documents = torch.nn.functional.normalize(torch.randn(2, 2, 6, 8, generator=generator), dim=-1)
+    pairwise_documents = torch.nn.functional.normalize(torch.randn(2, 6, 8, generator=generator), dim=-1)
+
+    for plain, mean, args in (
+        (colbert_scores, mean_colbert_scores, (queries, documents)),
+        (colbert_kd_scores, mean_colbert_kd_scores, (queries, documents)),
+        (colbert_scores_pairwise, mean_colbert_scores_pairwise, (queries, pairwise_documents)),
+    ):
+        assert torch.allclose(mean(*args) * 4, plain(*args), atol=1e-5), plain.__name__

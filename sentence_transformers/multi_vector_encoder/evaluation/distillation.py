@@ -43,9 +43,11 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
 
     - KL divergence between teacher and student score distributions (lower is better).
     - Spearman rank correlation between teacher and student scores (higher is better, the primary
-      metric). With candidate sets this is the mean of the per-query correlations: MaxSim scores are
-      summed over query tokens, so absolute scores are not comparable across queries and a single
-      correlation over all scores would mostly measure per-query offsets rather than ranking. Queries
+      metric). With candidate sets this is the mean of the per-query correlations, matching the
+      per-query KL above. It also avoids a scale trap: MaxSim sums over query tokens, so absolute
+      scores are not comparable across queries (MeanMaxSim divides that out, but the per-query
+      correlation is the one that tracks the loss either way) and a single correlation over all
+      scores would mostly measure per-query offsets rather than ranking. Queries
       where the teacher or student scores are constant have no defined rank correlation and are
       skipped from the mean (0.0 is reported if every query is skipped).
 
@@ -65,11 +67,11 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
             of the same name. Must be > 0. Defaults to None.
         teacher_temperature: Teacher-side override of ``temperature``, mirroring the loss's parameter
             of the same name. Must be > 0. Defaults to None.
-        similarity_fct: Pairwise scoring callable replacing ``model.similarity_pairwise``, to mirror
-            a non-default training ``similarity_fct``: e.g. pass
-            ``functools.partial(colbert_scores_pairwise, length_normalize=True)`` when the loss uses
-            MeanMaxSim scoring, or the per-query KL cannot match the training loss. Defaults to None
-            (the model's own pairwise similarity).
+        similarity_fct: Pairwise scoring callable replacing ``model.similarity_pairwise``, to mirror a
+            non-default training ``similarity_fct``: e.g. pass ``mean_colbert_scores_pairwise`` when the
+            loss uses MeanMaxSim scoring, or the per-query KL cannot match the training loss. Setting
+            ``model.similarity_fn_name = "meanmaxsim"`` covers the same case without this argument.
+            Defaults to None (the model's own pairwise similarity).
         name: Optional run name appended to CSV filenames.
         batch_size: Batch size for encoding.
         show_progress_bar: Whether to show a progress bar.
@@ -219,8 +221,7 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
         kl = torch.nn.functional.kl_div(student_log_probs, teacher_log_probs, reduction=reduction, log_target=True)
         kl = kl.item() * self.student_temperature**2
         if self.nested_documents:
-            # Rank within each query, matching the per-query KL above: absolute MaxSim scores are
-            # not comparable across queries (see the class docstring).
+            # Rank within each query, matching the per-query KL above (see the class docstring).
             per_query = []
             for teacher_row, student_row in zip(self.scores.numpy(), student_scores.numpy()):
                 correlation, _ = spearmanr(teacher_row, student_row)

@@ -46,9 +46,10 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
             dense :class:`~sentence_transformers.losses.MultipleNegativesRankingLoss` uses ``scale=20.0``
             to amplify the narrow range), MaxSim is an unbounded sum over query-token similarities (range
             ``~[0, num_query_tokens]``), so a scale near ``1.0`` makes sense, the same reason the dense
-            loss recommends ``scale=1`` for dot-product similarity. With length-normalized scoring
-            (``functools.partial(colbert_scores, length_normalize=True)``, a.k.a. MeanMaxSim), scores are
-            bounded like cosine again and a much larger scale is appropriate, e.g. ``scale=1000``.
+            loss recommends ``scale=1`` for dot-product similarity. With MeanMaxSim scoring
+            (:func:`~sentence_transformers.multi_vector_encoder.scoring.mean_colbert_scores`), each score
+            is divided by its query's token count, so a scale of roughly the average query length is a
+            reasonable start.
         similarity_fct: Scoring callable. Defaults to
             :func:`~sentence_transformers.multi_vector_encoder.scoring.colbert_scores`. Pass
             :class:`~sentence_transformers.multi_vector_encoder.scoring.XTRScores` for XTR-style scoring.

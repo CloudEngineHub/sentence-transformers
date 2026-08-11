@@ -91,6 +91,7 @@ class MultiVectorEncoderModelCardData(BaseModelCardData):
         # "Maxsim" / "Xtr".
         similarity_fn_name = {
             "maxsim": "MaxSim",
+            "meanmaxsim": "MeanMaxSim",
             "xtr": "XTR",
         }.get(self.model.similarity_fn_name, self.model.similarity_fn_name.replace("_", " ").title())
         metadata.update(

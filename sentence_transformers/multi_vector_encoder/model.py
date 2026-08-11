@@ -102,8 +102,9 @@ class MultiVectorEncoder(BaseModel):
         model_card_data (MultiVectorEncoderModelCardData, optional): A model card data object. Defaults to None.
         backend (str, optional): The backend to use for inference. Can be ``"torch"`` (default), ``"onnx"``,
             or ``"openvino"``. Defaults to ``"torch"``.
-        similarity_fn_name (str or SimilarityFunction, optional): The name of the similarity function. Defaults
-            to ``"maxsim"``.
+        similarity_fn_name (str or SimilarityFunction, optional): The name of the similarity function, either
+            ``"maxsim"`` or ``"meanmaxsim"`` (MaxSim divided by the query's token count). Defaults to
+            ``"maxsim"``.
 
     Note:
         Length / expansion / masking knobs (``query_length``, ``document_length``, ``query_expansion``,
@@ -137,7 +138,10 @@ class MultiVectorEncoder(BaseModel):
     _default_prompts: dict[str, str | None] = {"query": None, "document": None}
     _model_card_model_id_placeholder = "multi_vector_encoder_model_id"
     model_type: str = "MultiVectorEncoder"
-    SUPPORTED_SIMILARITY_FN_NAMES: ClassVar[tuple[str, ...]] = (SimilarityFunction.MAXSIM.value,)
+    SUPPORTED_SIMILARITY_FN_NAMES: ClassVar[tuple[str, ...]] = (
+        SimilarityFunction.MAXSIM.value,
+        SimilarityFunction.MEAN_MAXSIM.value,
+    )
 
     def __init__(
         self,
@@ -1108,9 +1112,10 @@ class MultiVectorEncoder(BaseModel):
         return result
 
     @property
-    def similarity_fn_name(self) -> Literal["maxsim"]:
-        """The similarity function used by :meth:`similarity` and :meth:`similarity_pairwise`. Defaults to
-        ``"maxsim"`` on first access if not explicitly set."""
+    def similarity_fn_name(self) -> Literal["maxsim", "meanmaxsim"]:
+        """The similarity function used by :meth:`similarity` and :meth:`similarity_pairwise`. Set it to
+        ``"meanmaxsim"`` for a model trained with length-normalized scoring, so evaluators and the model
+        card score the way training did. Defaults to ``"maxsim"`` on first access if not explicitly set."""
         if self._similarity_fn_name is None:
             self.similarity_fn_name = SimilarityFunction.MAXSIM
         return self._similarity_fn_name
@@ -1118,7 +1123,7 @@ class MultiVectorEncoder(BaseModel):
     @similarity_fn_name.setter
     def similarity_fn_name(
         self,
-        value: Literal["maxsim"] | SimilarityFunction | None,
+        value: Literal["maxsim", "meanmaxsim"] | SimilarityFunction | None,
     ) -> None:
         if isinstance(value, SimilarityFunction):
             value = value.value
@@ -1127,7 +1132,8 @@ class MultiVectorEncoder(BaseModel):
                 raise ValueError(
                     f"MultiVectorEncoder only supports {self.SUPPORTED_SIMILARITY_FN_NAMES} as the model-level "
                     "similarity. XTR is a training-time scoring: pass xtr_scores (or a configured XTRScores) "
-                    "as a loss's similarity_fct instead. Evaluation and model.similarity score with MaxSim."
+                    "as a loss's similarity_fct instead. XTR's global top-k runs over the in-batch token "
+                    "pool, so a pair's score depends on batch composition and is not well defined here."
                 )
             raise ValueError(
                 f"MultiVectorEncoder only supports {self.SUPPORTED_SIMILARITY_FN_NAMES}, got {value!r}. "
@@ -1144,7 +1150,8 @@ class MultiVectorEncoder(BaseModel):
         embeddings1: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
         embeddings2: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
     ) -> Tensor:
-        """Compute the all-pairs MaxSim score matrix between two collections of multi-vector embeddings.
+        """Compute the all-pairs score matrix between two collections of multi-vector embeddings, using
+        this model's :attr:`similarity_fn_name`.
 
         Returns a matrix of shape ``(num_embeddings_1, num_embeddings_2)``.
 
@@ -1164,7 +1171,8 @@ class MultiVectorEncoder(BaseModel):
         embeddings1: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
         embeddings2: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
     ) -> Tensor:
-        """Compute the pairwise MaxSim score vector between matched query / document pairs."""
+        """Compute the pairwise score vector between matched query / document pairs, using this
+        model's :attr:`similarity_fn_name`."""
         self.similarity_fn_name  # noqa: B018 (trigger lazy init)
         return self._similarity_pairwise(embeddings1, embeddings2)
 

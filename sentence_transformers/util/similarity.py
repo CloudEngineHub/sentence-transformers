@@ -589,6 +589,54 @@ def maxsim_pairwise(
     return scores
 
 
+def mean_maxsim(
+    a: list | np.ndarray | Tensor,
+    b: list | np.ndarray | Tensor,
+    a_mask: Tensor | None = None,
+    b_mask: Tensor | None = None,
+    document_chunk_elements: int | None = None,
+) -> Tensor:
+    """
+    Computes the MeanMaxSim score between two collections of multi-vector embeddings: :func:`maxsim`
+    divided by each query's real token count, with :func:`maxsim`'s arguments and return shape.
+
+    MaxSim sums one similarity per query token, so its scale grows with query length and scores are
+    not comparable across queries. MeanMaxSim averages instead, landing in the per-token similarity
+    range (about ``[-1, 1]`` for normalized embeddings). Rankings within a query are unchanged, since
+    the divisor is constant per row.
+    """
+    return maxsim(
+        a,
+        b,
+        a_mask=a_mask,
+        b_mask=b_mask,
+        document_chunk_elements=document_chunk_elements,
+        length_normalize=True,
+    )
+
+
+def mean_maxsim_pairwise(
+    a: list | np.ndarray | Tensor,
+    b: list | np.ndarray | Tensor,
+    a_mask: Tensor | None = None,
+    b_mask: Tensor | None = None,
+    pair_chunk_elements: int | None = None,
+) -> Tensor:
+    """
+    Computes the pairwise MeanMaxSim score for each query-document pair: :func:`maxsim_pairwise`
+    divided by each query's real token count, with its arguments and return shape. See
+    :func:`mean_maxsim` for why.
+    """
+    return maxsim_pairwise(
+        a,
+        b,
+        a_mask=a_mask,
+        b_mask=b_mask,
+        pair_chunk_elements=pair_chunk_elements,
+        length_normalize=True,
+    )
+
+
 def _maxsim_score_pairs(a: Tensor, b: Tensor, a_mask: Tensor | None, b_mask: Tensor | None) -> Tensor:
     """Score one chunk of aligned query-document pairs, returned as ``(batch,)`` float32. Pulled out of
     :func:`maxsim_pairwise` so the chunk loop stays readable. The mirror of
@@ -714,6 +762,8 @@ class SimilarityFunction(Enum):
     - ``SimilarityFunction.MANHATTAN`` (``"manhattan"``): Manhattan distance
     - ``SimilarityFunction.MAXSIM`` (``"maxsim"``): Late-interaction MaxSim, used by
       :class:`~sentence_transformers.MultiVectorEncoder` (ColBERT-style) models.
+    - ``SimilarityFunction.MEAN_MAXSIM`` (``"meanmaxsim"``): MaxSim divided by the query's token
+      count, so scores are comparable across query lengths. Same rankings within a query.
     """
 
     COSINE = "cosine"
@@ -722,6 +772,7 @@ class SimilarityFunction(Enum):
     EUCLIDEAN = "euclidean"
     MANHATTAN = "manhattan"
     MAXSIM = "maxsim"
+    MEAN_MAXSIM = "meanmaxsim"
 
     @staticmethod
     def to_similarity_fn(
@@ -758,6 +809,8 @@ class SimilarityFunction(Enum):
             return euclidean_sim
         if similarity_function == SimilarityFunction.MAXSIM:
             return maxsim
+        if similarity_function == SimilarityFunction.MEAN_MAXSIM:
+            return mean_maxsim
 
         raise ValueError(
             f"The provided function {similarity_function} is not supported. Use one of the supported values: {SimilarityFunction.possible_values()}."
@@ -801,6 +854,8 @@ class SimilarityFunction(Enum):
             return pairwise_euclidean_sim
         if similarity_function == SimilarityFunction.MAXSIM:
             return maxsim_pairwise
+        if similarity_function == SimilarityFunction.MEAN_MAXSIM:
+            return mean_maxsim_pairwise
 
         raise ValueError(
             f"The provided function {similarity_function} is not supported. Use one of the supported values: {SimilarityFunction.possible_values()}."
@@ -817,6 +872,6 @@ class SimilarityFunction(Enum):
         Example:
             >>> possible_values = SimilarityFunction.possible_values()
             >>> possible_values
-            ['cosine', 'dot', 'euclidean', 'manhattan', 'maxsim']
+            ['cosine', 'dot', 'euclidean', 'manhattan', 'maxsim', 'meanmaxsim']
         """
         return [m.value for m in SimilarityFunction]

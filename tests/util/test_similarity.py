@@ -1036,3 +1036,42 @@ def test_maxsim_length_normalize_divides_by_real_query_tokens() -> None:
     plain_pairwise = maxsim_pairwise(queries, documents)
     mean_pairwise = maxsim_pairwise(queries, documents, length_normalize=True)
     assert torch.allclose(mean_pairwise, plain_pairwise / lens.squeeze(1))
+
+
+def test_mean_maxsim_matches_length_normalized_maxsim() -> None:
+    """The named MeanMaxSim functions are the length_normalize=True form of their MaxSim
+    counterparts, and SimilarityFunction resolves "meanmaxsim" to them."""
+    from sentence_transformers.util import SimilarityFunction, mean_maxsim, mean_maxsim_pairwise
+
+    generator = torch.Generator().manual_seed(3)
+    queries = [torch.randn(4, 8, generator=generator), torch.randn(9, 8, generator=generator)]
+    documents = [torch.randn(5, 8, generator=generator), torch.randn(7, 8, generator=generator)]
+
+    assert torch.allclose(mean_maxsim(queries, documents), maxsim(queries, documents, length_normalize=True))
+    assert torch.allclose(
+        mean_maxsim_pairwise(queries, documents), maxsim_pairwise(queries, documents, length_normalize=True)
+    )
+    assert SimilarityFunction.to_similarity_fn("meanmaxsim") is mean_maxsim
+    assert SimilarityFunction.to_similarity_pairwise_fn("meanmaxsim") is mean_maxsim_pairwise
+    assert "meanmaxsim" in SimilarityFunction.possible_values()
+
+
+def test_mean_maxsim_denominator_follows_the_scoring_mask() -> None:
+    """MeanMaxSim divides by whatever the scoring counted as real. A genuinely zero query row (token
+    pooling can emit one) is padding to the mask a bare 3-D input derives, but a real token to a list
+    input, so an explicit mask is what makes the two agree. Rankings are unaffected either way."""
+    generator = torch.Generator().manual_seed(17)
+    query = torch.nn.functional.normalize(torch.randn(5, 8, generator=generator), dim=-1)
+    query[2] = 0.0
+    documents = [torch.nn.functional.normalize(torch.randn(6, 8, generator=generator), dim=-1)]
+
+    plain = maxsim([query], documents).item()
+    assert plain == maxsim(query[None], documents).item(), "plain MaxSim cannot see the difference"
+
+    as_list = maxsim([query], documents, length_normalize=True).item()
+    as_tensor = maxsim(query[None], documents, length_normalize=True).item()
+    assert as_list == pytest.approx(plain / 5), "a list input counts the zero row"
+    assert as_tensor == pytest.approx(plain / 4), "_zero_row_mask reads it as padding"
+
+    all_real = torch.ones(1, 5, dtype=torch.bool)
+    assert maxsim(query[None], documents, a_mask=all_real, length_normalize=True).item() == pytest.approx(as_list)

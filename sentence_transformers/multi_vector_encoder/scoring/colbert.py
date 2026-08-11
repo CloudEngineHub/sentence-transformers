@@ -116,3 +116,44 @@ def colbert_scores(
         for j in range(N)
     ]
     return torch.stack(per_group, dim=2).reshape(-1, D * N)
+
+
+def mean_colbert_scores(
+    queries_embeddings: list | np.ndarray | torch.Tensor,
+    documents_embeddings: list | np.ndarray | torch.Tensor,
+    queries_mask: torch.Tensor | None = None,
+    documents_mask: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """MeanMaxSim contrastive scoring: :func:`colbert_scores` divided by each query's real token count.
+
+    Pair it with ``model.similarity_fn_name = "meanmaxsim"`` so evaluation scores the way training did.
+    """
+    return colbert_scores(
+        queries_embeddings, documents_embeddings, queries_mask, documents_mask, length_normalize=True
+    )
+
+
+def mean_colbert_scores_pairwise(
+    queries_embeddings: list | np.ndarray | torch.Tensor,
+    documents_embeddings: list | np.ndarray | torch.Tensor,
+    queries_mask: torch.Tensor | None = None,
+    documents_mask: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """MeanMaxSim pairwise scoring, the :func:`colbert_scores_pairwise` counterpart of
+    :func:`mean_colbert_scores`. Use it as :class:`MultiVectorMarginMSELoss`'s ``similarity_fct``."""
+    return colbert_scores_pairwise(
+        queries_embeddings, documents_embeddings, queries_mask, documents_mask, length_normalize=True
+    )
+
+
+def mean_colbert_kd_scores(
+    queries_embeddings: list | np.ndarray | torch.Tensor,
+    documents_embeddings: list | np.ndarray | torch.Tensor,
+    queries_mask: torch.Tensor | None = None,
+    documents_mask: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """MeanMaxSim listwise KD scoring, the :func:`colbert_kd_scores` counterpart of
+    :func:`mean_colbert_scores`. Use it as :class:`MultiVectorDistillKLDivLoss`'s ``similarity_fct``."""
+    return colbert_kd_scores(
+        queries_embeddings, documents_embeddings, queries_mask, documents_mask, length_normalize=True
+    )

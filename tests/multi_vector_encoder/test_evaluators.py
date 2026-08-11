@@ -195,8 +195,14 @@ def test_triplet_evaluator_config_dict_margin() -> None:
     evaluator = MultiVectorTripletEvaluator(anchors=["a"], positives=["p"], negatives=["n"])
     assert "margin" not in evaluator.get_config_dict()
 
+    # A float margin applies to every supported similarity, so it fans out over both scoring modes.
     evaluator = MultiVectorTripletEvaluator(anchors=["a"], positives=["p"], negatives=["n"], margin=0.5)
-    assert evaluator.get_config_dict()["margin"] == {"maxsim": 0.5}
+    assert evaluator.get_config_dict()["margin"] == {"maxsim": 0.5, "meanmaxsim": 0.5}
+
+    evaluator = MultiVectorTripletEvaluator(
+        anchors=["a"], positives=["p"], negatives=["n"], margin={"meanmaxsim": 0.1}
+    )
+    assert evaluator.get_config_dict()["margin"] == {"maxsim": 0, "meanmaxsim": 0.1}
 
 
 def test_triplet_evaluator_rejects_dense_margin_keys() -> None:
@@ -368,7 +374,7 @@ def test_distillation_evaluator_temperature_matches_training_loss(model: MultiVe
             {"student_temperature": 0.05, "teacher_temperature": 0.5},
         ),
         # A non-default training similarity_fct mirrors via the matching pairwise scorer.
-        "mean_maxsim": (
+        "meanmaxsim": (
             {"similarity_fct": partial(colbert_kd_scores, length_normalize=True)},
             {"similarity_fct": partial(colbert_scores_pairwise, length_normalize=True)},
         ),
