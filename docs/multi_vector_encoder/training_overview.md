@@ -78,7 +78,7 @@ But if instead you want to train from a base transformer model, the classic ColB
     # MultiVectorEncoder(
     #   (0): Transformer({'transformer_task': 'feature-extraction', 'modality_config': {'text': {'method': 'forward', 'method_output_name': 'last_hidden_state'}}, 'module_output_name': 'token_embeddings', 'architecture': 'ModernBertModel'})
     #   (1): Dense({'in_features': 768, 'out_features': 128, 'bias': False, 'activation_function': 'torch.nn.modules.linear.Identity', 'module_input_name': 'token_embeddings', 'module_output_name': 'token_embeddings'})
-    #   (2): MultiVectorMask({'skiplist_words': [], 'keep_only_token_ids': None})
+    #   (2): MultiVectorMask({'skiplist_words': [], 'skiplist_tasks': ['document'], 'keep_only_token_ids': None})
     #   (3): Normalize({'module_input_name': 'token_embeddings', 'module_output_name': 'token_embeddings'})
     # )
 

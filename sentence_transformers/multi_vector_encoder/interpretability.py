@@ -234,9 +234,10 @@ def maxsim_heatmap(
         image_embedding: ``(Dt, D)`` per-token image-document embeddings.
         n_patches: ``(n_cols, n_rows)`` image grid shape, as returned by :func:`get_n_patches`.
         image_mask: optional mask filtering ``image_embedding`` to image patches only.
-        aggregate: ``"sum"`` reflects per-patch contribution to the MaxSim ranking score.
-            ``"amax"`` shows the strongest single-token match per patch. ``"none"`` returns one
-            heatmap per query token as a list.
+        aggregate: ``"sum"`` adds every query token's similarity at each patch, giving an aggregate
+            similarity heatmap rather than an attribution of the MaxSim score, which counts only each
+            query token's single best patch. ``"amax"`` shows the strongest single-token match per
+            patch. ``"none"`` returns one heatmap per query token as a list.
         alpha: constant overlay opacity in ``[0, 1]``.
 
     Returns:

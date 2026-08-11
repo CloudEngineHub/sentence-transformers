@@ -80,7 +80,7 @@ family). ``print(model)`` shows the stack with every knob in the module configs,
     #   (0): Transformer({..., 'document_length': 180,
     #                     'query_expansion': {'strategy': 'fixed', 'attend': False, 'token': None, 'length': 32}})
     #   (1): Dense({'in_features': 768, 'out_features': 128, 'bias': False, ...})
-    #   (2): MultiVectorMask({'skiplist_words': ['!', '"', '#', ..., '}', '~'], 'keep_only_token_ids': None})
+    #   (2): MultiVectorMask({'skiplist_words': ['!', '"', '#', ..., '}', '~'], 'skiplist_tasks': ['document'], 'keep_only_token_ids': None})
     #   (3): Normalize({...})
     # )
     print(model.prompts)

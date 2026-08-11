@@ -11,7 +11,7 @@ By default this script:
    ``keep_only_token_ids`` filter so the document embedding only contains image-patch tokens.
 3. Encodes one query and one image-document.
 4. Computes per-query-token similarity over the 32x32 PaliGemma image grid.
-5. Saves a sum-aggregated heatmap overlay (per-patch contribution to the MaxSim ranking score) as
+5. Saves a sum-aggregated heatmap overlay (aggregate per-patch query similarity, not MaxSim attribution) as
    ``heatmap_reranker.png``, plus one overlay per real query token.
 
 The patch grid shape is inferred from the model's processor via
