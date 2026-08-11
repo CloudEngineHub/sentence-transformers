@@ -188,8 +188,8 @@ def test_pretrained_prompt_prefix_stays_one_token(model_name: str) -> None:
 
 @pytest.mark.parametrize("model_name, expected_scores", IMAGE_MODELS_TO_MAXSIM.items())
 @pytest.mark.skipif(
-    not torch.cuda.is_available() or torch.cuda.get_device_properties(0).total_memory < _MIN_IMAGE_MAXSIM_VRAM_BYTES,
-    reason="float32 ColPali is a 3B model needing ~13 GiB; requires a >=16 GiB CUDA device",
+    torch.cuda.device_count() == 0 or torch.cuda.get_device_properties(0).total_memory < _MIN_IMAGE_MAXSIM_VRAM_BYTES,
+    reason="float32 ColPali is a 3B model needing ~13 GiB, which requires a >=16 GiB CUDA device",
 )
 @pytest.mark.slow
 def test_pretrained_image_document_maxsim(model_name: str, expected_scores: list[list[float]]) -> None:

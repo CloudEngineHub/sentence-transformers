@@ -171,8 +171,7 @@ Conventions for a feature-column module:
 - Pair it with a scoring function that splits the column back off (e.g. slice ``[..., :-1]`` for the
   embeddings and ``[..., -1]`` for the weights) and pass it as ``similarity_fct`` to the losses. The
   default MaxSim functions are channel-blind and would fold the extra column into the dot products.
-- Note that ``get_embedding_dimension()`` counts the extra columns, and ``precision`` quantization
-  applies to them.
+- Note that ``get_embedding_dimension()`` counts the extra columns.
 
 For ad-hoc access to *named* module outputs (without the trailing-column convention), pass
 ``output_value=None`` to the encode methods to get the raw per-input feature dicts::
