@@ -443,7 +443,8 @@ def maxsim(
     for d_start, d_end in ranges:
         chunk_b, chunk_b_mask = _pad_chunk(b, b_mask, d_start, d_end, device, "b_mask")
         score_chunks.append(_maxsim_score_documents(a, chunk_b, a_mask_padded, chunk_b_mask))
-    scores = torch.cat(score_chunks, dim=1)
+    # cat copies even a single chunk, which is the common case of a batch that fits the budget.
+    scores = score_chunks[0] if len(score_chunks) == 1 else torch.cat(score_chunks, dim=1)
     if query_token_counts is not None:
         scores = scores / query_token_counts.to(device=scores.device, dtype=scores.dtype).unsqueeze(1)
     return scores
@@ -583,7 +584,7 @@ def maxsim_pairwise(
         chunk_a, chunk_a_mask = _pad_chunk(a, a_mask, start, end, device, "a_mask")
         chunk_b, chunk_b_mask = _pad_chunk(b, b_mask, start, end, device, "b_mask")
         score_chunks.append(_maxsim_score_pairs(chunk_a, chunk_b, chunk_a_mask, chunk_b_mask))
-    scores = torch.cat(score_chunks, dim=0)
+    scores = score_chunks[0] if len(score_chunks) == 1 else torch.cat(score_chunks, dim=0)
     if query_token_counts is not None:
         scores = scores / query_token_counts.to(device=scores.device, dtype=scores.dtype)
     return scores

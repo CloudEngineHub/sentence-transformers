@@ -185,21 +185,3 @@ def embed_columns_padded(
         for features in features_list
     ]
     return [embeddings for embeddings, _ in outputs], [mask.bool() for _, mask in outputs]
-
-
-def chunked_embedding_forward(
-    model: nn.Module,
-    features: dict[str, Any],
-    mini_batch_size: int | None,
-    task: str | None = None,
-) -> Tensor:
-    """Chunked forward for single-vector models, returning ``sentence_embedding``.
-
-    The single-vector counterpart of :func:`chunked_padded_forward`: pooling has already collapsed
-    the token axis, so the per-chunk ``(rows, dim)`` outputs concatenate directly. See
-    :func:`_chunked_outputs` for the chunking contract.
-    """
-    outputs = _chunked_outputs(model, features, mini_batch_size, task)
-    if len(outputs) == 1:
-        return outputs[0]["sentence_embedding"]
-    return torch.cat([output["sentence_embedding"] for output in outputs], dim=0)

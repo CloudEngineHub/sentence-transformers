@@ -211,16 +211,6 @@ class TestTransformerInit:
         else:
             assert str(norm_default) == str(norm_none)
 
-    @pytest.mark.skipif(
-        parse_version(transformers_version) >= parse_version("5.0.0"),
-        reason="Transformers v5 only has fast tokenizers",
-    )
-    def test_do_lower_case_slow_tokenizer_fallback(self):
-        """For slow tokenizers, do_lower_case should set processor.do_lower_case."""
-        transformer = Transformer(TINY_BERT, do_lower_case=True, processor_kwargs={"use_fast": False})
-        assert transformer.tokenizer.is_fast is False
-        assert transformer.processor.do_lower_case is True
-
     def test_do_lower_case_tokenizer_persisted_after_save_load(self, tmp_path):
         """The Lowercase normalizer added to the tokenizer should persist after save/load."""
         transformer = Transformer(TINY_BERT, do_lower_case=True)
@@ -2080,15 +2070,6 @@ class TestConditionalFlattening:
 
         transformer.preprocess(["dummy"])
         transformer.data_collator.assert_called_once()
-
-
-@pytest.mark.skipif(
-    Version(transformers_version) >= Version("5.0.0"),
-    reason="Test only applies to transformers v4",
-)
-def test_any_to_any_requires_transformers_v5():
-    with pytest.raises(ImportError, match="transformers v5"):
-        Transformer("hf-internal-testing/tiny-random-LlamaForCausalLM", transformer_task="any-to-any")
 
 
 class TestCountMediaPerSample:

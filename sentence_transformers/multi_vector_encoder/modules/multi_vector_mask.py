@@ -70,6 +70,7 @@ class MultiVectorMask(Module):
     def __init__(
         self,
         skiplist_words: list[str] | None = None,
+        *,
         skiplist_tasks: str | list[str] | None = None,
         keep_only_token_ids: list[int] | None = None,
     ) -> None:

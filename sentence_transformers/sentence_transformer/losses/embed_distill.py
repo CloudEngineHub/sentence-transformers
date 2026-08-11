@@ -172,6 +172,7 @@ class EmbedDistillLoss(nn.Module):
         sentence_features = list(sentence_features)
         embeddings = [self.model(sentence_feature)["sentence_embedding"] for sentence_feature in sentence_features]
 
+        labels = labels.detach()
         if labels.dim() == 2:
             # Same teacher embedding targeted by every input column (broadcast).
             teacher_embeddings = [labels for _ in embeddings]

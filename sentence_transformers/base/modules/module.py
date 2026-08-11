@@ -393,6 +393,11 @@ class Module(ABC, torch.nn.Module):
         state, e.g. :class:`~sentence_transformers.multi_vector_encoder.modules.MultiVectorMask`
         resolves its skiplist words against the model's tokenizer here. The default is a no-op.
 
+        The hook fires during model construction, so a module appended to an already-built model
+        (e.g. ``model.append(module)``) does not receive it. Call it yourself in that case, or set
+        the module's model-dependent state directly. Saving and reloading also runs it, so the state
+        is present again after a round trip.
+
         Args:
             model: The fully constructed model this module is part of.
         """

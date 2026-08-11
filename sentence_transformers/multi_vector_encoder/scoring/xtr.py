@@ -64,7 +64,7 @@ def xtr_scores(
     if document_chunk_elements is None:
         D_flat = docs_flat.reshape(Db * Dt, H).T
         scores = (Q_flat @ D_flat).view(Qb, Qt, Db, Dt)
-        scores = scores.masked_fill(
+        scores.masked_fill_(
             ~docs_mask_flat.bool().unsqueeze(0).unsqueeze(0),
             torch.finfo(scores.dtype).min,
         )
@@ -77,7 +77,7 @@ def xtr_scores(
             chunk_D_flat = docs_flat[d_start:d_end].reshape(db * Dt, H).T
             chunk_scores = (Q_flat @ chunk_D_flat).view(Qb, Qt, db, Dt)
             chunk_mask = docs_mask_flat[d_start:d_end]
-            chunk_scores = chunk_scores.masked_fill(
+            chunk_scores.masked_fill_(
                 ~chunk_mask.bool().unsqueeze(0).unsqueeze(0),
                 torch.finfo(chunk_scores.dtype).min,
             )

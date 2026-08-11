@@ -128,6 +128,10 @@ class TripletEvaluator(BaseEvaluator):
         self.similarity_fn_names = similarity_fn_names or []
 
         fn_keys = list(self._get_similarity_functions().keys())
+        if unknown_names := sorted(set(self.similarity_fn_names) - set(fn_keys)):
+            raise ValueError(
+                f"`similarity_fn_names` got unexpected names {unknown_names}, expected names in {fn_keys}."
+            )
         if margin is None:
             self.margin = {k: 0 for k in fn_keys}
         elif isinstance(margin, (float, int)):

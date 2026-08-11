@@ -51,3 +51,10 @@ def test_triplet_evaluator_config_dict_margin() -> None:
 def test_triplet_evaluator_rejects_unknown_margin_keys() -> None:
     with pytest.raises(ValueError, match=r"unexpected keys \['cosien'\]"):
         TripletEvaluator(anchors=["a"], positives=["p"], negatives=["n"], margin={"cosien": 0.5})
+
+
+def test_triplet_evaluator_rejects_unknown_similarity_fn_names() -> None:
+    # Without this guard a typo passes construction, weakens the margin validation into accepting
+    # the same typo, and only fails deep in __call__ at scoring time.
+    with pytest.raises(ValueError, match=r"unexpected names \['cosin'\]"):
+        TripletEvaluator(anchors=["a"], positives=["p"], negatives=["n"], similarity_fn_names=["cosin"])

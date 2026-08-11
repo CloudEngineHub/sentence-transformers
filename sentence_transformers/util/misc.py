@@ -53,7 +53,19 @@ def similarity_fct_name(similarity_fct: Callable) -> str:
         name = getattr(similarity_fct.func, "__name__", type(similarity_fct.func).__name__)
         args = ", ".join(f"{key}={value!r}" for key, value in similarity_fct.keywords.items())
         return f"{name}({args})" if args else name
+    # ``model.similarity`` / ``model.similarity_pairwise`` are bound methods that dispatch on the
+    # model's similarity_fn_name, so report the function they resolve to rather than "similarity".
+    owner = getattr(similarity_fct, "__self__", None)
     name = getattr(similarity_fct, "__name__", type(similarity_fct).__name__)
+    if name in ("similarity", "similarity_pairwise") and hasattr(owner, "similarity_fn_name"):
+        from sentence_transformers.util.similarity import SimilarityFunction
+
+        resolve = (
+            SimilarityFunction.to_similarity_fn
+            if name == "similarity"
+            else SimilarityFunction.to_similarity_pairwise_fn
+        )
+        return resolve(owner.similarity_fn_name).__name__
     metric_config = getattr(similarity_fct, "get_config_dict", None)
     if metric_config is not None:
         args = ", ".join(f"{key}={value!r}" for key, value in metric_config().items())

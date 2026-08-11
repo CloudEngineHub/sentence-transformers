@@ -146,7 +146,7 @@ class MultiVectorMarginMSELoss(nn.Module):
         student_margins = torch.stack(
             [pos_scores - self._score(q, n, q_mask, nm) for n, nm in zip(negs, neg_masks)], dim=1
         )
-        return self.loss_function(student_margins, labels.to(student_margins.dtype))
+        return self.loss_function(student_margins, labels.detach().to(student_margins.dtype))
 
     @property
     def citation(self) -> str:

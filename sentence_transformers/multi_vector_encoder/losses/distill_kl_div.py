@@ -166,7 +166,7 @@ class MultiVectorDistillKLDivLoss(nn.Module):
         )
 
         student_log_probs = F.log_softmax(scores / self.student_temperature, dim=-1)
-        teacher_log_probs = F.log_softmax(labels / self.teacher_temperature, dim=-1)
+        teacher_log_probs = F.log_softmax(labels.detach() / self.teacher_temperature, dim=-1)
         if not self._checked_teacher_scale:
             self._checked_teacher_scale = True
             check_teacher_targets(teacher_log_probs.exp(), labels, self.teacher_temperature, type(self).__name__)

@@ -110,6 +110,7 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
         queries: Sequence[SingleInput],
         documents: Sequence[SingleInput] | Sequence[Sequence[SingleInput]],
         scores: list[float] | list[list[float]] | torch.Tensor,
+        *,
         temperature: float = 1.0,
         student_temperature: float | None = None,
         teacher_temperature: float | None = None,

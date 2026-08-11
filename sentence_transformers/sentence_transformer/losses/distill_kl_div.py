@@ -196,7 +196,7 @@ class DistillKLDivLoss(nn.Module):
         student_log_probs = torch.log_softmax(student_scores, dim=1)
 
         # Compute teacher scores
-        teacher_scores = labels / self.teacher_temperature
+        teacher_scores = labels.detach() / self.teacher_temperature
         teacher_probs = torch.softmax(teacher_scores, dim=1)
         if not self._checked_teacher_scale:
             self._checked_teacher_scale = True
