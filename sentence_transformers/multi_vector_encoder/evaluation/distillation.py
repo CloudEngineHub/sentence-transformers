@@ -11,6 +11,7 @@ import torch
 from scipy.stats import spearmanr
 
 from sentence_transformers.base.evaluation.evaluator import BaseEvaluator
+from sentence_transformers.base.modality import is_message_dict
 from sentence_transformers.util import similarity_fct_name
 
 if TYPE_CHECKING:
@@ -127,7 +128,9 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
                 f"must all have the same length."
             )
         self.queries = list(queries)
-        self.nested_documents = bool(documents) and isinstance(documents[0], (list, tuple))
+        # A conversation is a list of message dicts, so it is one document, not a candidate list.
+        first = documents[0] if documents else None
+        self.nested_documents = isinstance(first, (list, tuple)) and not (first and is_message_dict(first[0]))
         # Flat per-query documents, or per-query candidate lists when nested_documents is set.
         self.documents: list[Any]
         if self.nested_documents:
