@@ -340,7 +340,7 @@ def test_num_labels_fresh_model():
 
 # The transformer-less stacks below aren't runnable end-to-end (no non-Transformer InputModule
 # currently preprocesses CrossEncoder pairs), but we technically allow them so the property logic
-# (config/model/num_labels/activation_fn) is exercised in isolation; it's what makes stacks like
+# (config/model/num_labels/activation_fn) is exercised in isolation. It's what makes stacks like
 # Transformer + Pooling + Dense(scores) usable as rerankers.
 @pytest.mark.parametrize("out_features", [1, 3, 7])
 def test_num_labels_from_dense_scores_module(static_embedding: StaticEmbedding, out_features: int):
@@ -1067,6 +1067,24 @@ Judge whether the Document meets the requirements based on the Query and the Ins
 
     # Assert scores match expected values with tolerance
     assert scores == pytest.approx(expected_scores, abs=1e-4)
+
+
+def test_conversion_ignores_source_prompts_and_default_prompt_name(tmp_path: Path) -> None:
+    """Converting a SentenceTransformer save appends a fresh classification head, so the source's
+    embedding prompts and default_prompt_name are not inherited: they would otherwise silently be
+    prepended to every predict call."""
+    from sentence_transformers import SentenceTransformer
+
+    source = SentenceTransformer(
+        "sentence-transformers-testing/stsb-bert-tiny-safetensors",
+        prompts={"query": "Represent this sentence: "},
+        default_prompt_name="query",
+    )
+    source.save_pretrained(str(tmp_path))
+
+    model = CrossEncoder(str(tmp_path))
+    assert model.prompts == {}
+    assert model.default_prompt_name is None
 
 
 def test_predict_routes_through_module_call(reranker_bert_tiny_model: CrossEncoder) -> None:

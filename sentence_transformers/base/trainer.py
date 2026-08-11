@@ -61,7 +61,7 @@ from sentence_transformers.util import disable_logging, fullname, is_datasets_av
 from sentence_transformers.util.decorators import deprecated_kwargs
 
 if is_datasets_available():
-    from datasets import Dataset, DatasetDict, IterableDataset, IterableDatasetDict, Value
+    from datasets import Dataset, DatasetDict, IterableDataset, IterableDatasetDict, Sequence, Value
 
 logger = logging.getLogger(__name__)
 
@@ -235,9 +235,13 @@ class BaseTrainer(Trainer, ABC):
             if isinstance(dataset, IterableDataset) and dataset.column_names is None:
                 sample = next(iter(dataset))
                 naive_type_mapping = {str: "string", int: "int64", float: "float32", bool: "bool"}
-                example_features = {
-                    key: Value(naive_type_mapping.get(type(value), "null")) for key, value in sample.items()
-                }
+
+                def naive_feature(value: Any) -> Any:
+                    if isinstance(value, (list, tuple)):
+                        return Sequence(naive_feature(value[0]) if value else Value("string"))
+                    return Value(naive_type_mapping.get(type(value), "null"))
+
+                example_features = {key: naive_feature(value) for key, value in sample.items()}
                 raise ValueError(
                     f"The provided `{dataset_name}_dataset` must have Features. Specify them with e.g.:\n"
                     f"{dataset_name}_dataset = {dataset_name}_dataset.cast(Features({example_features}))\n"
@@ -369,6 +373,8 @@ class BaseTrainer(Trainer, ABC):
             preprocess_fn=model.preprocess,
             router_mapping=args.router_mapping,
             prompts=args.prompts,
+            # Only MultiVectorEncoderTrainingArguments defines max_length so far.
+            max_length=getattr(args, "max_length", None),
         )
 
     def add_model_card_callback(self, default_args_dict: dict[str, Any]) -> None:
@@ -420,7 +426,7 @@ class BaseTrainer(Trainer, ABC):
 
         for name, child in loss.named_children():
             if name == "model" and isinstance(child, BaseModel):
-                # DDP/compile wrappers don't expose BaseModel methods; bind the ones
+                # DDP/compile wrappers don't expose BaseModel methods. Bind the ones
                 # losses call inside `forward` (CE: `preprocess`, MatryoshkaLoss:
                 # `get_embedding_dimension`).
                 for attr in ("preprocess", "get_embedding_dimension"):
