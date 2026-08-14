@@ -21,7 +21,8 @@ def xtr_scores(
     (simulating retrieval from an index). Returns the full ``(Q, Q*N)`` cross-product score matrix with
     query-major ordering: ``scores[i, j*N + n]`` is query ``i`` against query ``j``'s ``n``-th document.
     The positive for query ``i`` sits at column ``i*N``. As in :func:`~sentence_transformers.util.similarity.maxsim`,
-    the matmul runs in the input dtype and the per-query-token accumulation and returned scores are float32.
+    the matmul runs in the input dtype (integer embeddings are upcast to float32 first) and the
+    per-query-token accumulation and returned scores are float32.
 
     Each score is the sum of the query's retrieved per-token maxima divided by ``Z``, the number of
     query tokens that retrieved at least one of the document's tokens (Lee et al. 2023, eq. 5). This
@@ -30,10 +31,10 @@ def xtr_scores(
     Args:
         queries_embeddings: ``(Q, q_tokens, dim)`` query embeddings.
         documents_embeddings: ``(Q, N, d_tokens, dim)`` stacked per-query document groups.
-        queries_mask: optional ``(Q, q_tokens)`` mask.
+        queries_mask: optional ``(Q, q_tokens)`` mask. If None, all-zero query rows are treated as padding.
         documents_mask: optional ``(Q, N, d_tokens)`` mask. If None, one is derived by treating
             all-zero document rows as padding (like :func:`~sentence_transformers.util.similarity.maxsim`).
-        top_k: Number of top token matches to retain per query token across all Q*N documents.
+        top_k: Positive number of top token matches to retain per query token across all Q*N documents.
         chunk_elements: Element budget for the matmul + ``masked_fill`` phase, matching
             :func:`~sentence_transformers.util.similarity.maxsim`'s parameter of the same name:
             documents are scored in chunks packed to stay under the budget. The chunks are
@@ -47,8 +48,17 @@ def xtr_scores(
         to switch from ColBERT-style MaxSim scoring to XTR-style top-k scoring. To compile the hot path,
         wrap it: ``similarity_fct=torch.compile(xtr_scores)``.
     """
+    if isinstance(top_k, bool) or top_k <= 0:
+        raise ValueError(f"top_k must be a positive integer, got {top_k!r}.")
+
+    # Integer (quantized) embeddings would carry through to an integer score grid, which the
+    # dtype-min masked_fill below cannot express: torch.finfo rejects it.
     queries_embeddings = _convert_to_tensor(queries_embeddings)
     documents_embeddings = _convert_to_tensor(documents_embeddings)
+    if not queries_embeddings.is_floating_point():
+        queries_embeddings = queries_embeddings.float()
+    if not documents_embeddings.is_floating_point():
+        documents_embeddings = documents_embeddings.float()
     Qb, Qt, H = queries_embeddings.shape
     D, N, Dt, _ = documents_embeddings.shape
     Db = D * N
@@ -60,6 +70,9 @@ def xtr_scores(
         # Mirror maxsim: treat all-zero rows as padding, or a pad token's 0.0 wins the per-document
         # max over genuinely negative real similarities.
         docs_mask_flat = _zero_row_mask(docs_flat)
+    if queries_mask is None:
+        # Match the document-side fallback: zero-padded query rows must not contribute to scores or Z.
+        queries_mask = _zero_row_mask(queries_embeddings).bool()
 
     if chunk_elements is None:
         D_flat = docs_flat.reshape(Db * Dt, H).T
@@ -103,9 +116,8 @@ def xtr_scores(
     # XTR imputes a missing similarity as 0, which is what a document with no retrieved token gets.
     topk_scores_max = topk_scores_max.masked_fill(~alpha, 0.0)
 
-    if queries_mask is not None:
-        topk_scores_max = topk_scores_max * queries_mask.unsqueeze(-1)
-        alpha = alpha & queries_mask.bool().unsqueeze(-1)
+    topk_scores_max = topk_scores_max * queries_mask.unsqueeze(-1)
+    alpha = alpha & queries_mask.bool().unsqueeze(-1)
 
     scores_sum = topk_scores_max.sum(dim=1)
     Z = alpha.float().sum(dim=1).clamp_(min=1)
@@ -182,7 +194,7 @@ class XTRScores:
     and shapes.
 
     Args:
-        top_k: Number of top token matches to retain per query token across all Q*N documents.
+        top_k: Positive number of top token matches to retain per query token across all Q*N documents.
         chunk_elements: Element budget for the chunked matmul phase, see :func:`xtr_scores`.
     """
 
