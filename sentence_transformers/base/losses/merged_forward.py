@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
@@ -13,10 +13,6 @@ from transformers.utils import logging
 from sentence_transformers.base.losses.gradcache import _create_minibatch, _get_batch_size, _minibatch_ranges
 from sentence_transformers.util import cat_padded_token_embeddings
 
-# TODO(v6): only the MultiVectorEncoder losses use this so far. Extend it to the SentenceTransformer
-# losses (SparseEncoder inherits those) before v6 so the archetypes do not diverge. Measured at 1.15x
-# to 2x end-to-end there, scaling with how many columns share a forward pass.
-
 logger = logging.get_logger(__name__)
 
 _MERGING_DISABLED: ContextVar[bool] = ContextVar("merging_disabled", default=False)
@@ -26,12 +22,13 @@ def _separate_forwards(reason: str) -> None:
     """Note why the columns are embedded separately, then return None so the caller falls back.
 
     Speed only: the per-column path produces the same loss and gradients. Worth surfacing because
-    otherwise a setup that never qualifies looks identical to one that always does.
+    otherwise a setup that never qualifies looks identical to one that always does. Reserved for
+    reasons with a call-site fix: guards that a model architecture can never pass refuse silently.
     """
     logger.warning_once(
         f"Note: embedding each input column in its own forward pass, because {reason}. Columns that "
         "preprocess identically are combined into one forward pass instead, which is faster. The loss "
-        "and gradients are the same either way."
+        "and gradients are the same either way, up to dropout sampling."
     )
     return None
 
@@ -74,18 +71,19 @@ def merge_feature_batches(features_list: list[dict[str, Any]]) -> dict[str, Any]
     first = features_list[0]
     if any(set(features) != set(first) for features in features_list[1:]):
         return _separate_forwards("the columns preprocess to different sets of features")
-    # A flattened batch packs its rows into one sequence described by its own bookkeeping
-    # (cu_seq_lens_q, max_length_q), which concatenation would interleave into meaningless offsets.
+    # A flattened batch packs its rows into one sequence whose cu_seq_lens_q offsets concatenation would scramble.
     if "cu_seq_lens_q" in first:
-        return _separate_forwards("the inputs are flattened for flash attention")
-    # Without a text batch axis there is nothing to validate the remaining tensors against.
-    if not any(isinstance(first.get(key), Tensor) for key in ("input_ids", "attention_mask")):
-        return _separate_forwards("the features carry no 'input_ids' or 'attention_mask' to align rows by")
+        return None
+    # No batched text tensor to align rows by, e.g. StaticEmbedding's flattened 1D token stream.
+    if not any(isinstance(first.get(key), Tensor) and first[key].ndim >= 2 for key in ("input_ids", "attention_mask")):
+        return None
     rows = _get_batch_size(first)
     merged: dict[str, Any] = {}
     for key, first_value in first.items():
         values = [features[key] for features in features_list]
-        if isinstance(first_value, Tensor):
+        # prompt_length is batch metadata in every form Pooling supports (int, shape-1 tensor, or
+        # per-row tensor read as one value), so it must compare equal rather than concatenate.
+        if isinstance(first_value, Tensor) and key != "prompt_length":
             if any(not isinstance(value, Tensor) or value.ndim != first_value.ndim for value in values):
                 return _separate_forwards(f"the columns give {key!r} a different shape each")
             # Tensors whose row axis is not the batch axis (flattened VLM grids and friends) would
@@ -160,6 +158,36 @@ def chunked_padded_forward(
         [output["token_embeddings"] for output in outputs],
         [output["attention_mask"] for output in outputs],
     )
+
+
+def embed_columns(
+    model: nn.Module, features_list: Iterable[dict[str, Any]], separate_first: bool = False
+) -> list[Tensor]:
+    """Embed each input column, sharing one merged forward pass across columns when possible.
+
+    Returns one ``sentence_embedding`` tensor per column. When :func:`merge_feature_batches`
+    refuses, falls back to one forward per column, which fills each per-column dict exactly like
+    the classic ``model(features)`` loss pattern it replaces.
+
+    Only merge columns that share a width profile. The merged batch pads every column to the
+    cross-column max width, and that padding costs real compute and peak activation memory: merging
+    a narrow query column in with long document columns can end up slower than per-column forwards.
+    The anchor-based losses therefore pass ``separate_first``, which keeps the first (anchor)
+    column on its own forward pass and merges only the candidate columns, mirroring the
+    MultiVectorEncoder losses. With two columns that leaves nothing to merge. To force per-column
+    forwards regardless, wrap the loss call in :func:`column_merging_disabled`.
+    """
+    features_list = list(features_list)
+    if separate_first and features_list:
+        return [
+            model(features_list[0])["sentence_embedding"],
+            *embed_columns(model, features_list[1:]),
+        ]
+    merged = merge_feature_batches(features_list) if len(features_list) > 1 else None
+    if merged is None:
+        return [model(features)["sentence_embedding"] for features in features_list]
+    embeddings = model(merged)["sentence_embedding"]
+    return list(embeddings.reshape(len(features_list), -1, *embeddings.shape[1:]).unbind(0))
 
 
 def embed_columns_padded(
