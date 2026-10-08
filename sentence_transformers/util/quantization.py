@@ -490,8 +490,9 @@ def quantize_embeddings(
                         "or a `calibration_embeddings` that can be used to calculate the buckets."
                     )
                 ranges = np.vstack((np.min(embeddings, axis=0), np.max(embeddings, axis=0)))
+        ranges = ranges.astype(np.float32, copy=False)
         starts = ranges[0, :]
-        steps = (ranges[1, :] - ranges[0, :]) / 255
+        steps = (ranges[1, :] - starts) / 255
         steps = np.where(steps == 0, 1, steps)
 
         q_vals = np.clip(np.floor((embeddings - starts) / steps), 0, 255)
