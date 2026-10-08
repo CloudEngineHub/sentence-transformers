@@ -14,6 +14,7 @@ from sentence_transformers.util.tensor import (
     _move_tensors_to_device,
     normalize_embeddings,
     select_max_active_dims,
+    to_scipy_coo,
 )
 
 
@@ -33,6 +34,20 @@ def test_move_tensors_to_device_preserves_nested_outputs(target_device):
     assert moved[1:] == ("metadata", None)
     assert original[0]["embeddings"][0] is tensor
     assert _move_tensors_to_cpu(original)[0]["embeddings"][0] is tensor
+
+
+@pytest.mark.parametrize(
+    ("dtype", "expected_dtype"),
+    [(torch.bfloat16, np.float32), (torch.float32, np.float32), (torch.float64, np.float64)],
+)
+def test_to_scipy_coo_preserves_sparse_values(dtype: torch.dtype, expected_dtype: type) -> None:
+    tensor = torch.sparse_coo_tensor([[1, 0, 1], [0, 2, 0]], [0.5, 1.5, 0.25], (3, 4), dtype=dtype)
+
+    result = to_scipy_coo(tensor)
+
+    assert result.dtype == expected_dtype
+    assert result.nnz == 2
+    np.testing.assert_array_equal(result.toarray(), [[0, 0, 1.5, 0], [0.75, 0, 0, 0], [0, 0, 0, 0]])
 
 
 def test_normalize_embeddings() -> None:

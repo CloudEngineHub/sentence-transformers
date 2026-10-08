@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Literal
 import numpy as np
 from torch import Tensor
 
+from .tensor import _tensor_to_numpy
+
 logger = logging.getLogger(__name__)
 
 
@@ -438,12 +440,12 @@ def quantize_embeddings(
         ``(num_tokens, dim)`` arrays), returns a list of quantized matrices with shared per-dimension buckets.
     """
     if isinstance(embeddings, Tensor):
-        embeddings = embeddings.cpu().numpy()
+        embeddings = _tensor_to_numpy(embeddings)
     elif isinstance(embeddings, list):
         if not embeddings:
             return []
         if isinstance(embeddings[0], Tensor):
-            embeddings = [embedding.cpu().numpy() for embedding in embeddings]
+            embeddings = [_tensor_to_numpy(embedding) for embedding in embeddings]
         if isinstance(embeddings[0], np.ndarray) and embeddings[0].ndim == 2:
             # Calibrate once so all documents use the same ranges.
             if precision.endswith("int8") and ranges is None:
