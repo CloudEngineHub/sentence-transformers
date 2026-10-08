@@ -1890,3 +1890,24 @@ def test_missing_negatives_message_names_range_max(capsys: pytest.CaptureFixture
     )
     captured = capsys.readouterr()
     assert "Consider adjusting the range_max parameter if" in captured.out
+
+
+def test_one_column_dataset_raises_value_error(queries) -> None:
+    dataset = Dataset.from_dict({"anchor": queries[:3]})
+
+    with pytest.raises(ValueError, match="Dataset must contain at least two columns"):
+        mine_hard_negatives(dataset=dataset, model=SimpleNamespace(), verbose=False)
+
+
+def test_default_column_selection_allows_extra_columns() -> None:
+    dataset = Dataset.from_dict({"query": ["q"], "positive": ["p"], "metadata": [1]})
+
+    result = mine_hard_negatives(
+        dataset=dataset,
+        model=ControlledNegativeScoreModel(),
+        corpus=["p", "n_more_similar", "n_far"],
+        num_negatives=1,
+        verbose=False,
+    )
+
+    assert result.to_dict() == {"query": ["q"], "positive": ["p"], "negative": ["n_more_similar"]}
