@@ -386,6 +386,18 @@ def test_similarity_mixed_sparse_dense(sparse_tensors, similarity_fn, pairwise_s
     assert torch.allclose(pairwise_mixed, pairwise_dense, rtol=1e-5, atol=1e-5)
 
 
+@pytest.mark.parametrize("convert_x", [torch.tensor, np.asarray, list])
+@pytest.mark.parametrize("convert_y", [torch.tensor, np.asarray, list])
+def test_pairwise_angle_sim_input_types(convert_x, convert_y) -> None:
+    x = [[1.0, 2.0, 3.0, 4.0], [2.0, -1.0, 0.0, 3.0]]
+    y = [[4.0, 3.0, 2.0, 1.0], [1.0, 0.0, -2.0, 1.0]]
+    expected = pairwise_angle_sim(torch.tensor(x), torch.tensor(y))
+
+    scores = pairwise_angle_sim(convert_x(x), convert_y(y))
+
+    torch.testing.assert_close(scores, expected, check_dtype=False)
+
+
 @pytest.mark.parametrize("sparse_first", [True, False])
 def test_pairwise_angle_sim_mixed_sparse_dense(sparse_tensors, sparse_first) -> None:
     """Test that mixing a sparse and a dense operand matches the all-dense result."""
