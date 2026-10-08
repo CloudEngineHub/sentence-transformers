@@ -364,7 +364,12 @@ def mine_hard_negatives(
 
     faiss_cap_note = ""
     if range_max is None:
-        if absolute_margin is not None or relative_margin is not None or max_score is not None:
+        if (
+            absolute_margin is not None
+            or relative_margin is not None
+            or max_score is not None
+            or (cross_encoder is not None and min_score is not None)
+        ):
             # max_positives + 10 * num_negatives negatives because some might be skipped, and range_min skipped
             range_max = range_min + (num_negatives * 10) + max_positives
         else:
@@ -589,7 +594,7 @@ def mine_hard_negatives(
 
     # Rescore with cross_encoder
     if cross_encoder is not None and (
-        absolute_margin is not None or relative_margin is not None or max_score is not None
+        absolute_margin is not None or relative_margin is not None or max_score is not None or min_score is not None
     ):
         if use_multi_process:
             pool = cross_encoder.start_multi_process_pool(

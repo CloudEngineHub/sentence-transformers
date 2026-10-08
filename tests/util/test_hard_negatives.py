@@ -4,6 +4,7 @@ import importlib.util
 import logging
 import math
 import os
+import random
 from collections import defaultdict
 from copy import deepcopy
 from pathlib import Path
@@ -275,6 +276,48 @@ def test_cross_encoder_with_multiple_positives_non_faiss(
     assert "passage" in result.column_names
     assert "negative" in result.column_names
     assert len(result) > 0
+
+
+def test_cross_encoder_rescores_with_only_min_score(
+    dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer, reranker_bert_tiny_model: CrossEncoder
+) -> None:
+    """min_score is a score filter too, so it must filter on the CrossEncoder scores rather than the bi-encoder ones."""
+    cross_encoder = reranker_bert_tiny_model
+    result = mine_hard_negatives(
+        dataset=dataset,
+        model=static_retrieval_mrl_en_v1_model,
+        cross_encoder=cross_encoder,
+        min_score=-1e9,  # Keeps every candidate, so only the source of the scores is under test
+        output_format="triplet",
+        output_scores=True,
+        verbose=False,
+    )
+    assert result
+
+    reported = [row["scores"] for row in result]
+    expected_positive = cross_encoder.predict(list(zip(result["query"], result["passage"])))
+    expected_negative = cross_encoder.predict(list(zip(result["query"], result["negative"])))
+    assert [pos for pos, _ in reported] == pytest.approx(expected_positive.tolist(), rel=1e-4, abs=1e-4)
+    assert [neg for _, neg in reported] == pytest.approx(expected_negative.tolist(), rel=1e-4, abs=1e-4)
+
+
+def test_min_score_preserves_random_candidate_pool(
+    dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    results = []
+    for min_score in (None, -1.0):
+        monkeypatch.setattr(random, "sample", random.Random(0).sample)
+        results.append(
+            mine_hard_negatives(
+                dataset=dataset,
+                model=static_retrieval_mrl_en_v1_model,
+                min_score=min_score,
+                sampling_strategy="random",
+                verbose=False,
+            )
+        )
+
+    assert results[0].to_dict() == results[1].to_dict()
 
 
 def test_range_parameters(dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer) -> None:
