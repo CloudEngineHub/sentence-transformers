@@ -2325,6 +2325,8 @@ class Transformer(InputModule):
         Args:
             model_name_or_path (str): The model name on Hugging Face (e.g. 'sentence-transformers/all-MiniLM-L6-v2')
                 or the path to a local model directory.
+            transformer_task (TransformerTask): The task the Transformer is used for, which determines the
+                auto model class used to load the model, e.g. ``"feature-extraction"``.
             config (PretrainedConfig): The model configuration.
             backend (str): The backend used for model inference. Can be `torch`, `onnx`, or `openvino`.
             is_peft_model (bool): Whether the model is a PEFT model.
