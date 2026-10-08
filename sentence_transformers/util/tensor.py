@@ -113,13 +113,13 @@ def normalize_embeddings(embeddings: Tensor) -> Tensor:
     Normalizes the embeddings matrix, so that each sentence embedding has unit length.
 
     Args:
-        embeddings (Tensor): The input embeddings matrix.
+        embeddings (Tensor): A dense embedding vector or a dense or sparse embeddings matrix.
 
     Returns:
-        Tensor: The normalized embeddings matrix.
+        Tensor: The normalized embeddings, with the same shape as the input.
     """
     if not embeddings.is_sparse:
-        return torch.nn.functional.normalize(embeddings, p=2, dim=1)
+        return torch.nn.functional.normalize(embeddings, p=2, dim=-1)
 
     embeddings = embeddings.coalesce()
     indices, values = embeddings.indices(), embeddings.values()
