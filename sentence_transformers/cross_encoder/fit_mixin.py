@@ -21,7 +21,7 @@ from sentence_transformers.sentence_transformer.datasets.no_duplicates_dataloade
 from sentence_transformers.sentence_transformer.datasets.sentence_label import SentenceLabelDataset
 from sentence_transformers.sentence_transformer.model import SentenceTransformer
 from sentence_transformers.sentence_transformer.readers import InputExample
-from sentence_transformers.util import is_datasets_available
+from sentence_transformers.util import batch_to_device, is_datasets_available
 
 if is_datasets_available():
     from datasets import Dataset
@@ -149,22 +149,19 @@ class FitMixinLoss(nn.Module):
         self.loss_fct = loss_fct
         self.activation_fn = activation_fn
 
-    def forward(self, inputs: list[list[str]], labels: Tensor) -> Tensor:
+    def forward(
+        self, inputs: list[list[str]], labels: Tensor, prompt: str | None = None, task: str | None = None
+    ) -> Tensor:
         if len(inputs) != 2:
             raise ValueError(
-                f"BinaryCrossEntropyLoss expects a dataset with two non-label columns, but got a dataset with {len(inputs)} columns."
+                f"{self.loss_fct} expects a dataset with two non-label columns, but got a dataset with {len(inputs)} columns."
             )
 
         pairs = list(zip(inputs[0], inputs[1]))
-        tokens = self.model.tokenizer(
-            pairs,
-            padding=True,
-            truncation=True,
-            return_tensors="pt",
-        )
-        tokens.to(self.model.device)
-        logits = self.model(**tokens)[0]
-        if self.model.config.num_labels == 1:
+        tokens = self.model.preprocess(pairs, prompt=prompt, task=task)
+        tokens = batch_to_device(tokens, self.model.device)
+        logits = self.model(tokens)["scores"]
+        if self.model.num_labels == 1:
             logits = logits.view(-1)
             labels = labels.float()
         else:

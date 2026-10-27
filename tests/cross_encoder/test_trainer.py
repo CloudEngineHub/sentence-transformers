@@ -7,10 +7,12 @@ from pathlib import Path
 
 import pytest
 import torch
+from torch.utils.data import DataLoader
 
 from sentence_transformers.cross_encoder import CrossEncoder, CrossEncoderTrainer, CrossEncoderTrainingArguments
 from sentence_transformers.cross_encoder.data_collator import CrossEncoderDataCollator
 from sentence_transformers.cross_encoder.losses import BinaryCrossEntropyLoss
+from sentence_transformers.sentence_transformer.readers import InputExample
 from sentence_transformers.util import is_datasets_available, is_training_available
 
 if is_datasets_available():
@@ -377,5 +379,31 @@ def test_trainer_tensor_formatted_labels(tmp_path: Path, num_labels: int, labels
     result = trainer.train()
 
     assert result.global_step == 1
+    assert not torch.equal(weights, before)
+    assert torch.isfinite(weights).all()
+
+
+@pytest.mark.parametrize("model_fixture", ["reranker_bert_tiny_model", "multiclass_bert_tiny_model"])
+def test_fit_with_loss_fct(
+    model_fixture: str, request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CrossEncoder.fit() trains with a plain torch loss passed as `loss_fct`."""
+    monkeypatch.chdir(tmp_path)
+    model = request.getfixturevalue(model_fixture)
+    weights = model.model.classifier.weight
+    before = weights.detach().clone()
+    loss_fct = torch.nn.MSELoss() if model.num_labels == 1 else torch.nn.CrossEntropyLoss()
+    examples = [
+        InputExample(texts=[f"query {idx}", f"passage {idx}"], label=idx % max(model.num_labels, 2))
+        for idx in range(8)
+    ]
+    model.fit(
+        train_dataloader=DataLoader(examples, batch_size=4),
+        loss_fct=loss_fct,
+        epochs=1,
+        warmup_steps=0,
+        show_progress_bar=False,
+    )
+
     assert not torch.equal(weights, before)
     assert torch.isfinite(weights).all()
