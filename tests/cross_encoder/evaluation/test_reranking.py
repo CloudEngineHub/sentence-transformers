@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 import pytest
 
 from sentence_transformers import CrossEncoder
@@ -105,3 +107,25 @@ def test_validation_errors() -> None:
         CrossEncoderRerankingEvaluator([{"query": "q", "positive": ["a"], "negative": ["b"], "documents": ["c"]}])(
             None
         )
+
+
+def test_empty_documents() -> None:
+    samples = [
+        {"query": "empty", "positive": ["missing"], "documents": []},
+        {"query": "found", "positive": ["positive"], "documents": ["positive", "negative"]},
+    ]
+    model = Mock()
+    model.predict.return_value = [1.0, 0.0]
+
+    results = CrossEncoderRerankingEvaluator(samples, always_rerank_positives=False)(model)
+
+    assert results == {
+        "map": 0.5,
+        "mrr@10": 0.5,
+        "ndcg@10": 0.5,
+        "base_map": 0.5,
+        "base_mrr@10": 0.5,
+        "base_ndcg@10": 0.5,
+    }
+    model.predict.assert_called_once()
+    assert model.predict.call_args.args[0] == [["found", "positive"], ["found", "negative"]]
