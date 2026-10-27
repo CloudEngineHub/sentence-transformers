@@ -149,6 +149,33 @@ similarities = model.similarity(embeddings[0], embeddings[1:])
 
 As you can see, the similarity between the related sentences is much higher than the unrelated sentence, despite only using 3 layers. Feel free to copy this script locally, modify the `new_num_layers`, and observe the difference in similarities.
 
+## Evaluation during training
+
+To evaluate with fewer layers during training, temporarily remove the later layers and restore them afterwards. The subclass below uses the MPNet layer path from [Inference](#inference). You'll have to adapt this path for other architectures.
+
+```python
+from sentence_transformers.sentence_transformer.evaluation import EmbeddingSimilarityEvaluator
+
+
+class MPNetLayerEvaluator(EmbeddingSimilarityEvaluator):
+    def __init__(self, *args, num_layers: int, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.num_layers = num_layers
+
+    def __call__(self, model, *args, **kwargs):
+        encoder = model.transformers_model.encoder
+        all_layers = encoder.layer
+        encoder.layer = all_layers[: self.num_layers]
+        try:
+            return super().__call__(model, *args, **kwargs)
+        finally:
+            encoder.layer = all_layers
+```
+
+Create it like the `dev_evaluator` in [adaptive_layer_sts.py](adaptive_layer_sts.py), adding `num_layers`, and pass it to the trainer. To evaluate several layer counts, combine evaluators with distinct names in a [SequentialEvaluator](../../../../docs/package_reference/base/evaluation.rst).
+
+Use this subclass only for single-process training. With [DDP](../../../../docs/sentence_transformer/training/distributed.rst), only process zero truncates the model, so evaluation would mix embeddings from different layer counts.
+
 ## Code Examples
 
 See the following scripts as examples of how to apply the <a href="../../../../docs/package_reference/sentence_transformer/losses.html#adaptivelayerloss"><code>AdaptiveLayerLoss</code></a> in practice:
