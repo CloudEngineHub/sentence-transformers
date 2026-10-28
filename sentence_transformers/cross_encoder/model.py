@@ -187,13 +187,11 @@ class CrossEncoder(BaseModel, FitMixin):
         self.keep_in_fp32_modules = keep_in_fp32_modules
 
         if num_labels is not None:
-            if config_kwargs is None:
-                config_kwargs = {}
+            config_kwargs = dict(config_kwargs or {})
             config_kwargs["num_labels"] = num_labels
 
         if max_length is not None:
-            if processor_kwargs is None:
-                processor_kwargs = {}
+            processor_kwargs = dict(processor_kwargs or {})
             processor_kwargs["model_max_length"] = max_length
 
         super().__init__(

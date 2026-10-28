@@ -41,16 +41,51 @@ from sentence_transformers.util.decorators import (
 from tests.utils import GENERIC_INSTRUCT_TEMPLATE, RERANKER_TEMPLATE, skip_bfloat16_cpu_crash
 
 
-def test_classifier_dropout_is_set() -> None:
-    model = CrossEncoder("cross-encoder-testing/reranker-bert-tiny-gooaq-bce", classifier_dropout=0.1234)
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},
+        {"config_kwargs": None},
+        {"config_kwargs": {"classifier_dropout": 0.1}},
+        {"config_args": {"classifier_dropout": 0.1}},
+    ],
+)
+def test_classifier_dropout_is_set(reranker_bert_tiny_model: CrossEncoder, tmp_path: Path, kwargs: dict) -> None:
+    reranker_bert_tiny_model.save_pretrained(tmp_path)
+    original_kwargs = deepcopy(kwargs)
+    model = CrossEncoder(str(tmp_path), classifier_dropout=0.1234, local_files_only=True, device="cpu", **kwargs)
     assert model.config.classifier_dropout == 0.1234
-    assert model.model.config.classifier_dropout == 0.1234
+    assert model.model.dropout.p == 0.1234
+    assert kwargs == original_kwargs
 
 
 def test_classifier_dropout_default_value(reranker_bert_tiny_model: CrossEncoder) -> None:
     model = reranker_bert_tiny_model
     assert model.config.classifier_dropout is None
     assert model.model.config.classifier_dropout is None
+
+
+def test_init_does_not_mutate_kwargs(reranker_bert_tiny_model: CrossEncoder, tmp_path: Path) -> None:
+    reranker_bert_tiny_model.save_pretrained(tmp_path)
+    config_kwargs = {"output_attentions": False, "num_labels": 2}
+    processor_kwargs = {"model_max_length": 64}
+    model = CrossEncoder(
+        str(tmp_path),
+        num_labels=1,
+        max_length=32,
+        config_kwargs=config_kwargs,
+        processor_kwargs=processor_kwargs,
+        local_files_only=True,
+        device="cpu",
+    )
+    assert model.num_labels == 1
+    assert model.max_seq_length == 32
+    assert config_kwargs == {"output_attentions": False, "num_labels": 2}
+    assert processor_kwargs == {"model_max_length": 64}
+    original_model = CrossEncoder(
+        str(tmp_path), processor_kwargs=processor_kwargs, local_files_only=True, device="cpu"
+    )
+    assert original_model.max_seq_length == 64
 
 
 def test_load_with_revision() -> None:
