@@ -1827,6 +1827,47 @@ class ControlledNegativeScoreModel:
         )
 
 
+@pytest.mark.parametrize("margin", ["absolute_margin", "relative_margin"])
+def test_min_score_after_margin_removes_all_candidates(margin: str) -> None:
+    corpus = [f"n{i}" for i in range(20)]
+    model = ControlledNegativeScoreModel()
+    model.embeddings = {
+        "q": torch.tensor([1.0, 0.0]),
+        "p": torch.tensor([0.8, 0.6]),
+        **{text: torch.tensor([0.9, math.sqrt(1 - 0.9**2)]) for text in corpus},
+    }
+    result = mine_hard_negatives(
+        dataset=Dataset.from_dict({"query": ["q"], "positive": ["p"]}),
+        model=model,
+        corpus=corpus,
+        num_negatives=1,
+        min_score=0.3,
+        verbose=False,
+        **{margin: 0.1},
+    )
+    assert result.to_dict() == {"query": [], "positive": [], "negative": []}
+
+
+def test_min_score_counts_only_remaining_candidates(capsys: pytest.CaptureFixture) -> None:
+    model = ControlledNegativeScoreModel()
+    model.embeddings = {
+        text: torch.tensor([score, math.sqrt(1 - score**2)])
+        for text, score in [("q", 1.0), ("p", 0.9), ("close", 0.85), ("keep", 0.6), ("low", 0.2)]
+    }
+    result = mine_hard_negatives(
+        dataset=Dataset.from_dict({"query": ["q"], "positive": ["p"]}),
+        model=model,
+        corpus=["close", "keep", "low"],
+        range_max=3,
+        num_negatives=1,
+        absolute_margin=0.1,
+        min_score=0.3,
+    )
+    assert result["negative"] == ["keep"]
+    output = capsys.readouterr().out
+    assert any("Skipped 1 potential negatives" in line and "min_score" in line for line in output.splitlines())
+
+
 def test_relative_margin_with_negative_positive_score() -> None:
     """`relative_margin` must not keep a negative that is more similar to the anchor than the
     positive pair when the positive-pair score is negative (#3819)."""
