@@ -258,6 +258,14 @@ class FitMixin:
         train_dataloader.collate_fn = identity
 
         batch_size = getattr(train_dataloader, "batch_size", 8)
+        if batch_size is None:
+            # PyTorch sets `DataLoader.batch_size` to None when a custom `batch_sampler` is passed
+            batch_size = getattr(train_dataloader.batch_sampler, "batch_size", None) or 8
+            logger.warning(
+                "The DataLoader uses a custom `batch_sampler`, whose batch grouping `fit()` does not preserve. "
+                "We recommend using `CrossEncoderTrainer` instead, or `old_fit()` if your script was written for "
+                "Sentence Transformers v3."
+            )
         if isinstance(train_dataloader, NoDuplicatesDataLoader):
             batch_sampler = BatchSamplers.NO_DUPLICATES
         elif hasattr(train_dataloader, "dataset") and isinstance(train_dataloader.dataset, SentenceLabelDataset):

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import BatchSampler, DataLoader, SequentialSampler
 
 from sentence_transformers.cross_encoder import CrossEncoder, CrossEncoderTrainer, CrossEncoderTrainingArguments
 from sentence_transformers.cross_encoder.data_collator import CrossEncoderDataCollator
@@ -407,3 +407,28 @@ def test_fit_with_loss_fct(
 
     assert not torch.equal(weights, before)
     assert torch.isfinite(weights).all()
+
+
+def test_fit_with_custom_batch_sampler(
+    reranker_bert_tiny_model: CrossEncoder,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """CrossEncoder.fit() accepts a DataLoader built with `batch_sampler=...` and warns that it is not used."""
+    model = reranker_bert_tiny_model
+    monkeypatch.chdir(tmp_path)
+
+    def check_batch_size(trainer, **kwargs):
+        assert trainer.args.per_device_train_batch_size == 4
+
+    monkeypatch.setattr(CrossEncoderTrainer, "train", check_batch_size)
+
+    examples = [InputExample(texts=[f"query {idx}", f"passage {idx}"], label=float(idx % 2)) for idx in range(8)]
+    batch_sampler = BatchSampler(SequentialSampler(examples), batch_size=4, drop_last=False)
+    model.fit(
+        train_dataloader=DataLoader(examples, batch_sampler=batch_sampler),
+        epochs=1,
+        show_progress_bar=False,
+    )
+    assert "uses a custom `batch_sampler`, whose batch grouping `fit()` does not preserve" in caplog.text
